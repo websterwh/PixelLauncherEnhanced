@@ -16,8 +16,11 @@ import com.drdisagree.pixellauncherenhanced.data.common.Constants.FREEFORM_MODE
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.HIDE_APPS_FROM_APP_DRAWER
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.HIDE_GESTURE_PILL
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.HIDE_NAVIGATION_SPACE
+import com.drdisagree.pixellauncherenhanced.data.common.Constants.FOLDER_PREVIEW_ICON_SIZE_TEMP
+import com.drdisagree.pixellauncherenhanced.data.common.Constants.FOLDER_PREVIEW_ICON_SPACING_TEMP
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.RECENTS_CLEAR_ALL_BUTTON
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.SEARCH_HIDDEN_APPS
+import com.drdisagree.pixellauncherenhanced.data.common.Constants.TEMP_MASTER_ENABLE
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.THEMED_ICON_CUSTOM_BG_COLOR_DARK
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.THEMED_ICON_CUSTOM_BG_COLOR_LIGHT
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.THEMED_ICON_CUSTOM_COLOR
@@ -63,6 +66,11 @@ object PrefsHelper {
 
     fun isEnabled(key: String): Boolean {
         return when (key) {
+            // TEMPORARY (William, Aug 2026): see TEMP_MASTER_ENABLE in
+            // Constants.kt for removal instructions.
+            FOLDER_PREVIEW_ICON_SIZE_TEMP,
+            FOLDER_PREVIEW_ICON_SPACING_TEMP -> getBoolean(TEMP_MASTER_ENABLE, true)
+
             else -> true
         }
     }

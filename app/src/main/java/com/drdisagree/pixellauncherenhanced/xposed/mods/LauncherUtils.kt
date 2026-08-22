@@ -10,12 +10,15 @@ import com.drdisagree.pixellauncherenhanced.xposed.HookRes.Companion.modRes
 import com.drdisagree.pixellauncherenhanced.xposed.ModPack
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.XposedHook.Companion.findClass
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.callMethod
+import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.callMethodSilently
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.callStaticMethod
+import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.dumpClass
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getAnyField
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getField
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.hasMethod
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.hookConstructor
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.hookMethod
+import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.log
 import com.drdisagree.pixellauncherenhanced.xposed.utils.BootLoopProtector.resetCounter
 import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam
 import kotlinx.coroutines.CoroutineScope
@@ -94,7 +97,14 @@ class LauncherUtils(context: Context) : ModPack(context) {
         private var mCache: Any? = null
         private var mModel: Any? = null
 
-        private var lastRestartTime = 0L
+        // TEMPORARY (William, Aug 2026): diagnostic-only, fires once. See the
+        // comment on mModel.callMethodSilently("forceReload") in reloadIcons()
+        // below - forceReload() doesn't exist on this build's LauncherModel.
+        // This dumps the real class once so the actual replacement method
+        // name can be found instead of guessed. Search logcat for
+        // "LauncherModelDump". Remove this var, the dumpClass() call, and
+        // the mModelDumped guard once a real replacement is hooked up.
+        private var mModelDumped = false
 
         fun getAttrColor(context: Context, resID: Int): Int {
             return runCatching {
@@ -128,11 +138,31 @@ class LauncherUtils(context: Context) : ModPack(context) {
             } as Int
         }
 
-        fun restartLauncher(context: Context) {
-            val currentTime = System.currentTimeMillis()
+        // Root cause of the "restarts twice" bug (confirmed via the v17
+        // RestartDump capture on William's device, Aug 2026): when PLE
+        // reconnects after being reactivated (grant root -> Vector ->
+        // reopen), several unrelated preference keys replay their
+        // onChange in a burst - TopShadow, DarkStatusbar (x2),
+        // HideStatusbar (x2) all fired within a ~600ms window in that
+        // capture. The old guard only blocked a call within 500ms of the
+        // LAST FIRE, not the last call, so two calls in that burst landed
+        // >500ms apart and each independently toasted + killed the
+        // launcher - a real double restart, not a logging artifact.
+        //
+        // Switched from a leading-edge "fire immediately, then ignore
+        // calls for 500ms" guard to a trailing-edge one: every call
+        // (re)schedules the actual restart for RESTART_DEBOUNCE_MS after
+        // the LAST call, cancelling whatever was previously scheduled. A
+        // burst of any size, spread over any gap shorter than the debounce
+        // window, now collapses into exactly one restart.
+        private var restartJob: kotlinx.coroutines.Job? = null
+        private const val RESTART_DEBOUNCE_MS = 700L
 
-            if (currentTime - lastRestartTime >= 500) {
-                lastRestartTime = currentTime
+        fun restartLauncher(context: Context) {
+            restartJob?.cancel()
+            restartJob = CoroutineScope(Dispatchers.IO).launch {
+                delay(RESTART_DEBOUNCE_MS)
+
                 resetCounter(context.packageName)
 
                 Handler(Looper.getMainLooper()).post {
@@ -143,11 +173,9 @@ class LauncherUtils(context: Context) : ModPack(context) {
                     ).show()
                 }
 
-                CoroutineScope(Dispatchers.IO).launch {
-                    delay(1000)
-                    enqueueProxyCommand { proxy ->
-                        proxy.runCommand("killall ${context.packageName}")
-                    }
+                delay(1000)
+                enqueueProxyCommand { proxy ->
+                    proxy.runCommand("killall ${context.packageName}")
                 }
             }
         }
@@ -175,7 +203,25 @@ class LauncherUtils(context: Context) : ModPack(context) {
                     }
                 }
 
-                mModel.callMethod("forceReload")
+                if (!mModelDumped) {
+                    mModelDumped = true
+                    log("LauncherModelDump", "mModel.javaClass=${mModel?.javaClass?.name}")
+                    mModel?.javaClass.dumpClass()
+                }
+
+                // Was mModel.callMethod("forceReload") - that throws
+                // NoSuchMethodError and takes the whole launcher process down
+                // with it on builds where LauncherModel#forceReload() has been
+                // renamed/removed (confirmed via crash log on William's
+                // device, Aug 2026: "FATAL EXCEPTION... NoSuchMethodError:
+                // com.android.launcher3.LauncherModel#forceReload()", right
+                // before the launcher process got SIG 9'd and auto-respawned -
+                // almost certainly a real cause, maybe THE cause, of the
+                // "restarts twice" symptom, since that respawn is invisible/
+                // unexplained and can land right next to a legitimate,
+                // intentional restartLauncher() toast). callMethodSilently
+                // just no-ops instead of crashing if the method isn't there.
+                mModel.callMethodSilently("forceReload")
             }
         }
     }

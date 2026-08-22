@@ -276,7 +276,21 @@ class SliderPreference(
                 max(step.multiply(round).toDouble(), mSlider!!.valueFrom.toDouble()),
                 mSlider!!.valueTo.toDouble()
             )
-            if (value != values[i].toDouble()) {
+            // Was an exact `value != values[i].toDouble()` check - real bug
+            // found via device logs (William, Aug 2026): this Float ->
+            // Double -> BigDecimal -> Double round trip can land a hair off
+            // the stored Float even when the value is already correctly
+            // rounded, so needsCommit ended up true on basically every bind
+            // for some sliders. syncState() runs every time this preference
+            // is bound - including every time the settings screen rebuilds,
+            // e.g. just opening/revisiting it, not just on user edits - so
+            // it was silently re-saving the "corrected" value and
+            // re-triggering onSharedPreferenceChanged (and, for sliders
+            // like dock spacing, a full launcher restart) on essentially
+            // every visit to a screen with an affected slider, with no user
+            // interaction at all. An epsilon tolerance stops re-committing a
+            // value that's already effectively correct.
+            if (kotlin.math.abs(value - values[i].toDouble()) > 0.0001) {
                 values[i] = value.toFloat()
                 needsCommit = true
             }

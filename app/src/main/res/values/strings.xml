@@ -1,4 +1,4 @@
-<resources>
+﻿<resources>
     <string name="app_name" translatable="false">Pixel Launcher Enhanced</string>
     <string name="app_name_shortened" translatable="false">PLEnhanced</string>
     <string name="app_motto">Unleash the full potential of your launcher</string>
@@ -15,7 +15,7 @@
     <string name="btn_pick_image">Pick image</string>
     <string name="understood">Understood</string>
     <string name="settings_title">Settings</string>
-    <string name="search_hint">Search…</string>
+    <string name="search_hint">Searchâ€¦</string>
 
     <string name="root_connection_failed_title">Root connection failed</string>
     <string name="root_connection_failed_desc">Unable to connect to root service. Please grant root access and try again.</string>
@@ -48,6 +48,22 @@
     <string name="fragment_miscellaneous_desc">Other useful options</string>
     <string name="fragment_about_title">About</string>
     <string name="fragment_about_desc">About this application</string>
+    <!-- TEMPORARY (William, Aug 2026): whole entry. See TEMP_MASTER_ENABLE in
+         Constants.kt for removal instructions. -->
+    <string name="fragment_temp_title">[TEMP] Experimental</string>
+    <string name="fragment_temp_desc">Work-in-progress options, will be removed or made permanent later</string>
+    <string name="temp_master_enable_title">Enable TEMP adjustments</string>
+    <string name="temp_master_enable_desc">Turn off to disable every option on this screen at once, without losing the values below</string>
+    <string name="uninstall_in_context_menu_title">Uninstall in context menu</string>
+    <string name="uninstall_in_context_menu_desc">Add a real Uninstall entry to the long-press menu on home screen and app drawer icons (only shows for apps that can actually be uninstalled). Requires a launcher restart.</string>
+    <string name="backup_restore_settings_title">Backup / restore settings</string>
+    <string name="backup_restore_settings_desc">Save all PLE settings to a file, or load them back from a previously saved backup</string>
+    <string name="backup_settings_title">Backup</string>
+    <string name="backup_settings_success">Settings backed up</string>
+    <string name="backup_settings_failed">Backup failed</string>
+    <string name="restore_settings_title">Restore</string>
+    <string name="restore_settings_success">Settings restored, restarting launcher</string>
+    <string name="restore_settings_failed">Restore failed - file may not be a valid backup</string>
     <string name="fragment_hidden_apps_title">Hide apps</string>
 
     <string name="force_themed_icons_title">Force themed icons</string>
@@ -82,7 +98,7 @@
     <string name="recents_background_opacity_title">Recents background opacity</string>
     <string name="restart_launcher_title">Restart</string>
     <string name="restart_launcher_desc">Restart the launcher manually to apply any pending settings</string>
-    <string name="restarting_launcher">Restarting launcher…</string>
+    <string name="restarting_launcher">Restarting launcherâ€¦</string>
     <string name="developer_options_title">Developer options</string>
     <string name="developer_options_desc">Enable hidden developer options</string>
     <string name="entry_in_launcher_settings">Show entry in launcher settings</string>
@@ -112,6 +128,21 @@
     <string name="homescreen_columns_title">Homescreen columns</string>
     <string name="homescreen_rows_title">Homescreen rows</string>
     <string name="dock_columns_title">Dock columns</string>
+    <string name="folder_grid_rows_title">Folder rows</string>
+    <string name="folder_grid_columns_title">Folder columns</string>
+    <string name="folder_grid_4x4_title">Enable 4x4 folder grid</string>
+    <string name="folder_grid_4x4_desc">Lets folders grow up to a 4x4 grid per page when they have enough apps, instead of the default 3x3. Anything past 4x4 was found not to work, so this is on/off rather than a range. Requires a launcher restart.</string>
+    <string name="desktop_icon_horizontal_margin_title">Icon horizontal margin</string>
+    <string name="dock_bottom_spacing_title">Dock distance from bottom</string>
+    <string name="folder_preview_icon_count_title">Folder preview icon count</string>
+    <string name="folder_preview_icon_size_temp_title">[TEMP] Folder preview icon size</string>
+    <string name="folder_preview_icon_size_temp_desc">Testing only - controls how big the folder preview icons are when 7 or more are shown. Will be removed or made permanent later.</string>
+    <string name="folder_preview_icon_spacing_temp_title">[TEMP] Folder preview icon spacing</string>
+    <string name="folder_preview_icon_spacing_temp_desc">Testing only - controls how close together the folder preview icons are packed when 7 or more are shown. Will be removed or made permanent later.</string>
+    <string name="folder_preview_icon_gap_temp_title">[TEMP] Folder preview icon gap</string>
+    <string name="folder_preview_icon_gap_temp_desc">Testing only - adds a flat gap between folder preview icons, independent of the size and spacing sliders above. Will be removed or made permanent later.</string>
+    <string name="folder_preview_shape_temp_title">[TEMP] Folder preview shape</string>
+    <string name="folder_preview_shape_temp_desc">Testing only - which arrangement to use for folder previews with 5 or more icons. Will be removed or made permanent later.</string>
     <string name="app_drawer_columns_title">App drawer columns</string>
     <string name="app_drawer_row_height_multiplier_title">Row height multiplier</string>
     <string name="hide_apps_title">Hide apps from app drawer</string>
@@ -120,6 +151,9 @@
     <string name="section_general_title">General</string>
     <string name="section_icon_colors_title">Icon colors</string>
     <string name="section_interface_title">Interface</string>
+    <string name="section_grid_layout_title">Homescreen grid</string>
+    <string name="section_folder_grid_title">Folder grid</string>
+    <string name="section_spacing_title">Spacing</string>
     <string name="section_search_bar_title">Search bar</string>
     <string name="section_quickspace_title">Quickspace</string>
     <string name="section_hide_apps_title">Hide apps</string>

@@ -23,6 +23,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.PreferenceScreen
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.drdisagree.pixellauncherenhanced.R
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.SHARED_PREFERENCES
@@ -151,7 +152,26 @@ abstract class ControlledPreferenceFragmentCompat : PreferenceFragmentCompat() {
 
     override fun onResume() {
         super.onResume()
+
+        // updateScreen(null) walks the whole preference tree and can flip a
+        // preference's isVisible() (e.g. the hook-check status, which can
+        // change on a timer independent of this fragment's lifecycle) - any
+        // real visibility change forces PreferenceGroupAdapter to fully
+        // rebuild its flattened list, which resets the RecyclerView's scroll
+        // position instead of leaving it where the user left off. Capture
+        // the current scroll anchor first and restore it right after, so
+        // resuming the app (without the fragment being destroyed) doesn't
+        // visibly jump the list.
+        val layoutManager = listView?.layoutManager as? LinearLayoutManager
+        val anchorPosition = layoutManager?.findFirstVisibleItemPosition()
+            ?.takeIf { it != RecyclerView.NO_POSITION }
+        val anchorOffset = anchorPosition?.let { layoutManager.findViewByPosition(it)?.top } ?: 0
+
         updateScreen(null)
+
+        if (anchorPosition != null) {
+            layoutManager.scrollToPositionWithOffset(anchorPosition, anchorOffset)
+        }
     }
 
     override fun onDestroy() {

@@ -41,6 +41,22 @@
         android:title="@string/developer_options_title"
         app:iconSpaceReserved="false" />
 
+    <com.drdisagree.pixellauncherenhanced.ui.preferences.ListPreference
+        android:defaultValue="off"
+        android:dialogTitle="@string/uninstall_in_context_menu_title"
+        android:entries="@array/uninstall_in_context_menu_scope_str"
+        android:entryValues="@array/uninstall_in_context_menu_scope_value"
+        android:key="xposed_uninstallincontextmenu_scope"
+        android:title="@string/uninstall_in_context_menu_title"
+        app:iconSpaceReserved="false" />
+
+    <com.drdisagree.pixellauncherenhanced.ui.preferences.BackupRestorePreference
+        android:key="xposed_backuprestoresettings"
+        android:summary="@string/backup_restore_settings_desc"
+        android:title="@string/backup_restore_settings_title"
+        app:iconSpaceReserved="false" />
+
+    <!-- Kept last on the page (William, Aug 2026). -->
     <com.drdisagree.pixellauncherenhanced.ui.preferences.PreferenceMenu
         android:key="xposed_restartlauncher"
         android:summary="@string/restart_launcher_desc"

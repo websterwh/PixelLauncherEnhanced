@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/container"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginHorizontal="@dimen/ui_container_margin_side"
+    android:layout_marginBottom="2dp"
+    android:orientation="vertical"
+    android:paddingHorizontal="@dimen/preference_padding_horizontal"
+    android:paddingVertical="@dimen/preference_padding_vertical">
+
+    <TextView
+        android:id="@android:id/title"
+        style="@style/Preference.TitleText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textAlignment="viewStart"
+        android:textColor="@color/text_color_primary" />
+
+    <TextView
+        android:id="@android:id/summary"
+        style="@style/Preference.SummaryText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textAlignment="viewStart"
+        android:textColor="@color/text_color_secondary" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:baselineAligned="false"
+        android:orientation="horizontal">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_backup"
+            style="@style/Widget.MaterialButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="6dp"
+            android:layout_weight="1"
+            android:text="@string/backup_settings_title"
+            app:icon="@drawable/ic_open" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_restore"
+            style="@style/Widget.MaterialButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:layout_weight="1"
+            android:text="@string/restore_settings_title"
+            app:icon="@drawable/ic_open" />
+
+    </LinearLayout>
+
+</LinearLayout>

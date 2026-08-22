@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
@@ -66,6 +66,13 @@
             android:title="@string/desktop_icon_labels_title"
             app:iconSpaceReserved="false" />
 
+    </com.drdisagree.pixellauncherenhanced.ui.preferences.PreferenceCategory>
+
+    <com.drdisagree.pixellauncherenhanced.ui.preferences.PreferenceCategory
+        android:key="xposed_home_screen_grid_layout"
+        android:title="@string/section_grid_layout_title"
+        app:iconSpaceReserved="false">
+
         <com.drdisagree.pixellauncherenhanced.ui.preferences.SliderPreference
             android:key="xposed_desktopgridcolumns"
             android:title="@string/homescreen_columns_title"
@@ -101,6 +108,69 @@
             app:hideValueOnDefault="true"
             app:showResetButton="true"
             app:tickInterval="1" />
+
+    </com.drdisagree.pixellauncherenhanced.ui.preferences.PreferenceCategory>
+
+    <com.drdisagree.pixellauncherenhanced.ui.preferences.PreferenceCategory
+        android:key="xposed_home_screen_folder_grid"
+        android:title="@string/section_folder_grid_title"
+        app:iconSpaceReserved="false">
+
+        <!-- William, Aug 2026: was two independent rows/columns sliders
+             (up to 10x10), but on-device testing showed anything past 4x4
+             doesn't actually work - items don't fill the extra space.
+             Replaced with a single toggle for the one size that's confirmed
+             to work, instead of exposing a range that's mostly non-functional. -->
+        <com.drdisagree.pixellauncherenhanced.ui.preferences.SwitchPreference
+            android:defaultValue="false"
+            android:key="xposed_foldergrid4x4"
+            android:title="@string/folder_grid_4x4_title"
+            app:iconSpaceReserved="false" />
+
+        <com.drdisagree.pixellauncherenhanced.ui.preferences.SliderPreference
+            android:key="xposed_folderpreviewiconcount"
+            android:title="@string/folder_preview_icon_count_title"
+            app:defaultValue="0"
+            app:iconSpaceReserved="false"
+            app:maxVal="9"
+            app:minVal="0"
+            app:showDefaultIndicator="true"
+            app:hideValueOnDefault="true"
+            app:showResetButton="true"
+            app:tickInterval="1" />
+
+    </com.drdisagree.pixellauncherenhanced.ui.preferences.PreferenceCategory>
+
+    <com.drdisagree.pixellauncherenhanced.ui.preferences.PreferenceCategory
+        android:key="xposed_home_screen_spacing"
+        android:title="@string/section_spacing_title"
+        app:iconSpaceReserved="false">
+
+        <com.drdisagree.pixellauncherenhanced.ui.preferences.SliderPreference
+            android:key="xposed_desktopiconhorizontalmargin"
+            android:title="@string/desktop_icon_horizontal_margin_title"
+            app:defaultValue="0"
+            app:iconSpaceReserved="false"
+            app:maxVal="80"
+            app:minVal="-80"
+            app:showDefaultIndicator="true"
+            app:hideValueOnDefault="true"
+            app:showResetButton="true"
+            app:tickInterval="1"
+            app:valueFormat="dp" />
+
+        <com.drdisagree.pixellauncherenhanced.ui.preferences.SliderPreference
+            android:key="xposed_dockbottomspacing"
+            android:title="@string/dock_bottom_spacing_title"
+            app:defaultValue="0"
+            app:iconSpaceReserved="false"
+            app:maxVal="100"
+            app:minVal="-100"
+            app:showDefaultIndicator="true"
+            app:hideValueOnDefault="true"
+            app:showResetButton="true"
+            app:tickInterval="1"
+            app:valueFormat="dp" />
 
     </com.drdisagree.pixellauncherenhanced.ui.preferences.PreferenceCategory>
 

@@ -29,4 +29,35 @@
         <item>5</item>
     </string-array>
 
+    <!-- TEMPORARY (William, Aug 2026): see FOLDER_PREVIEW_SHAPE_TEMP in
+         Constants.kt for removal instructions. -->
+    <string-array name="folder_preview_shape_temp_str">
+        <item>Grid (square)</item>
+        <item>Circle</item>
+        <item>List (2 columns)</item>
+        <item>Honeycomb</item>
+    </string-array>
+
+    <string-array name="folder_preview_shape_temp_value">
+        <item>grid</item>
+        <item>circle</item>
+        <item>list</item>
+        <item>honeycomb</item>
+    </string-array>
+
+    <!-- William, Aug 2026: where the Uninstall context-menu entry shows up. -->
+    <string-array name="uninstall_in_context_menu_scope_str">
+        <item>Off</item>
+        <item>Home screen only</item>
+        <item>App drawer only</item>
+        <item>Both</item>
+    </string-array>
+
+    <string-array name="uninstall_in_context_menu_scope_value">
+        <item>off</item>
+        <item>home</item>
+        <item>drawer</item>
+        <item>both</item>
+    </string-array>
+
 </resources>

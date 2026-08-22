@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <!-- TEMPORARY (William, Aug 2026): whole screen. See TEMP_MASTER_ENABLE /
+         FOLDER_PREVIEW_ICON_SIZE_TEMP / FOLDER_PREVIEW_ICON_SPACING_TEMP in
+         Constants.kt for removal instructions. -->
+    <com.drdisagree.pixellauncherenhanced.ui.preferences.PreferenceCategory
+        android:key="xposed_temp_general"
+        android:title="@string/section_general_title"
+        app:iconSpaceReserved="false">
+
+        <com.drdisagree.pixellauncherenhanced.ui.preferences.SwitchPreference
+            android:defaultValue="true"
+            android:key="xposed_temp_master_enable"
+            android:summary="@string/temp_master_enable_desc"
+            android:title="@string/temp_master_enable_title"
+            app:iconSpaceReserved="false" />
+
+        <!-- William, Aug 2026: 100%/88%/2dp defaults are anchored to the
+             real stock 4-icon preview scale (derived from decompiled
+             source - see folderPreviewIconSpacingScale in GridOptions.kt)
+             and match William's own hand-tuned values almost exactly. -->
+        <com.drdisagree.pixellauncherenhanced.ui.preferences.SliderPreference
+            android:key="xposed_folderpreviewiconsize_temp"
+            android:summary="@string/folder_preview_icon_size_temp_desc"
+            android:title="@string/folder_preview_icon_size_temp_title"
+            app:defaultValue="100"
+            app:iconSpaceReserved="false"
+            app:maxVal="100"
+            app:minVal="40"
+            app:showController="true"
+            app:showDefaultIndicator="true"
+            app:showResetButton="true"
+            app:tickInterval="1"
+            app:valueFormat="%" />
+
+        <com.drdisagree.pixellauncherenhanced.ui.preferences.SliderPreference
+            android:key="xposed_folderpreviewiconspacing_temp"
+            android:summary="@string/folder_preview_icon_spacing_temp_desc"
+            android:title="@string/folder_preview_icon_spacing_temp_title"
+            app:defaultValue="88"
+            app:iconSpaceReserved="false"
+            app:maxVal="100"
+            app:minVal="40"
+            app:showController="true"
+            app:showDefaultIndicator="true"
+            app:showResetButton="true"
+            app:tickInterval="1"
+            app:valueFormat="%" />
+
+        <com.drdisagree.pixellauncherenhanced.ui.preferences.SliderPreference
+            android:key="xposed_folderpreviewicongap_temp"
+            android:summary="@string/folder_preview_icon_gap_temp_desc"
+            android:title="@string/folder_preview_icon_gap_temp_title"
+            app:defaultValue="2"
+            app:iconSpaceReserved="false"
+            app:maxVal="40"
+            app:minVal="0"
+            app:showController="true"
+            app:showDefaultIndicator="true"
+            app:hideValueOnDefault="true"
+            app:showResetButton="true"
+            app:tickInterval="1"
+            app:valueFormat="dp" />
+
+        <com.drdisagree.pixellauncherenhanced.ui.preferences.ListPreference
+            android:defaultValue="grid"
+            android:dialogTitle="@string/folder_preview_shape_temp_title"
+            android:entries="@array/folder_preview_shape_temp_str"
+            android:entryValues="@array/folder_preview_shape_temp_value"
+            android:key="xposed_folderpreviewshape_temp"
+            android:summary="@string/folder_preview_shape_temp_desc"
+            android:title="@string/folder_preview_shape_temp_title"
+            app:iconSpaceReserved="false" />
+
+    </com.drdisagree.pixellauncherenhanced.ui.preferences.PreferenceCategory>
+
+</PreferenceScreen>

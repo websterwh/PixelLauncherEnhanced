@@ -48,6 +48,47 @@ object Constants {
     const val DESKTOP_GRID_ROWS = "xposed_desktopgridrows"
     const val DESKTOP_GRID_COLUMNS = "xposed_desktopgridcolumns"
     const val DESKTOP_DOCK_COLUMNS = "xposed_desktopdockcolumns"
+    const val FOLDER_GRID_ROWS = "xposed_foldergridrows"
+    const val FOLDER_GRID_COLUMNS = "xposed_foldergridcolumns"
+
+    // William, Aug 2026: the independent rows/columns sliders above let him
+    // dial in folder grid sizes beyond 4x4, but on-device testing (Aug 2026)
+    // showed anything past 4x4 doesn't actually work (items just don't fill
+    // the extra rows/columns) - likely a hard limit elsewhere in the
+    // launcher. Replaced the two sliders with one on/off toggle for the one
+    // size that's confirmed to work. FOLDER_GRID_ROWS/FOLDER_GRID_COLUMNS
+    // above are no longer read from any preference screen but are left
+    // defined since GridOptions.kt's hooks still key off their values
+    // internally (now driven by this toggle instead of a slider).
+    const val FOLDER_GRID_4X4_ENABLE = "xposed_foldergrid4x4"
+    const val DESKTOP_ICON_HORIZONTAL_MARGIN = "xposed_desktopiconhorizontalmargin"
+    const val DOCK_BOTTOM_SPACING = "xposed_dockbottomspacing"
+    const val FOLDER_PREVIEW_ICON_COUNT = "xposed_folderpreviewiconcount"
+
+    // TEMPORARY (William, Aug 2026): lets him dial in the 7+-item folder
+    // preview icon size and spacing live on-device instead of guessing blind.
+    // Now live on their own "TEMP" main-menu tab (res/xml/temp_mods.xml,
+    // ui/fragments/TempMods.kt) instead of Home screen settings, gated by
+    // TEMP_MASTER_ENABLE below. Remove both constants, TEMP_MASTER_ENABLE,
+    // their GridOptions.kt usage, the TempMods fragment/screen, and the
+    // launcherTemp entry in home_page.xml once he's picked values - at that
+    // point bake the chosen numbers in as GridOptions.kt's constant defaults
+    // and delete these prefs entirely.
+    const val FOLDER_PREVIEW_ICON_SIZE_TEMP = "xposed_folderpreviewiconsize_temp"
+    const val FOLDER_PREVIEW_ICON_SPACING_TEMP = "xposed_folderpreviewiconspacing_temp"
+
+    // Third TEMP slider - flat dp gap added between preview icons,
+    // independent of the size/spacing sliders above.
+    const val FOLDER_PREVIEW_ICON_GAP_TEMP = "xposed_folderpreviewicongap_temp"
+
+    // Dropdown: which arrangement (grid/circle/list) to lay out a >4-item
+    // folder preview in.
+    const val FOLDER_PREVIEW_SHAPE_TEMP = "xposed_folderpreviewshape_temp"
+
+    // Master on/off toggle for the whole TEMP tab - flipping it off disables
+    // every temp adjustment at once (GridOptions.kt falls back to AOSP's own
+    // un-adjusted preview layout) without losing the dialed-in slider values.
+    const val TEMP_MASTER_ENABLE = "xposed_temp_master_enable"
     const val APP_DRAWER_GRID_COLUMNS = "xposed_appdrawergridcolumns"
     const val APP_DRAWER_GRID_ROW_HEIGHT_MULTIPLIER = "xposed_appdrawergridrowheightmultiplier"
     const val APP_BLOCK_LIST = "xposed_appblocklist"
@@ -71,6 +112,19 @@ object Constants {
     const val HIDE_NAVIGATION_SPACE = "xposed_hidenavigationspace"
     const val QUICK_LAUNCH = "xposed_quicklaunch"
     const val PREVENT_WALLPAPER_DIMMING_RESTART = "xposed_preventwallpaperdimmingrestart"
+    const val BACKUP_RESTORE_SETTINGS = "xposed_backuprestoresettings"
+
+    // William, Aug 2026: adds a real "Uninstall" entry to the long-press
+    // popup, built from SecondaryDropTarget.getUninstallTarget()/
+    // performUninstall() + SystemShortcut$AppInfo's mode=2 constructor (see
+    // LauncherSettings.kt). UNINSTALL_IN_CONTEXT_MENU was the original
+    // on/off SwitchPreference key - superseded by the 4-way
+    // UNINSTALL_IN_CONTEXT_MENU_SCOPE ListPreference below (off/home
+    // screen only/app drawer only/both) and no longer read anywhere, kept
+    // only so an old stored Boolean under this key doesn't collide with
+    // the new String-valued key.
+    const val UNINSTALL_IN_CONTEXT_MENU = "xposed_uninstallincontextmenu"
+    const val UNINSTALL_IN_CONTEXT_MENU_SCOPE = "xposed_uninstallincontextmenu_scope"
 
     val PREF_UPDATE_EXCLUSIONS = listOf(
         BootLoopProtector.LOAD_TIME_KEY_KEY,
