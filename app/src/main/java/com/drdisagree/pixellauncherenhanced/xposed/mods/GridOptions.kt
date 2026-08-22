@@ -660,6 +660,23 @@ class GridOptions (context: Context) : ModPack(context) {
         // the true curNumItems for whichever folder is currently being drawn.
         val lastCurNumItemsByRule = java.util.WeakHashMap<Any, Int>()
 
+        // William, Aug 2026, v49: companion cache to lastCurNumItemsByRule
+        // above, holding the folder's TOTAL content count per rule instance.
+        // The v48 FlashDebug capture confirmed why this is needed:
+        // createAnimatorSet walks page icons as getGridPosition(i/mCountX,
+        // i%mCountX) where mCountX is sized from TOTAL contents (Social: 11
+        // items -> 4 cols), while this file's other math keys off the PREVIEW
+        // count (min(9, ...) -> 3 cols). Reconstructing the reading-order
+        // index with the 3-wide stride against the caller's 4-wide walk
+        // produced duplicated indices (0,1,2,3,3,4,5,6,6,7,8) - two pairs of
+        // icons flew to identical destinations during close, which is the
+        // visible "order goes wrong then fixes" glitch. The getGridPosition
+        // hook below rebuilds the caller's column count from this cached
+        // total instead. Populated in the fallback computePreviewItemDrawingParams
+        // hook (the only place that has both the rule and its owning
+        // FolderIcon's mInfo).
+        val lastTotalContentsByRule = java.util.WeakHashMap<Any, Int>()
+
         // William, Aug 2026: TEMP master toggle off previously fell back to a
         // hardcoded 0dp gap here - but the gap SLIDER's own default is 2dp
         // (see folderPreviewIconGapTemp/temp_mods.xml), not 0. So even with
@@ -788,6 +805,24 @@ class GridOptions (context: Context) : ModPack(context) {
         // icons enough that ring 2 (needed at 8+ items) still fits inside
         // availableSpace, rather than reusing the unrelated square-grid
         // icon size. So: real honeycomb shape, correctly bounded size.
+        // William, Aug 2026, v5: fixed slot SELECTION above 7 items (the v48
+        // HoneycombDebug log confirmed this exactly). The old code generated
+        // ALL slots for maxRing rings, sorted every one of them by (y, x),
+        // then handed reading-order indices to the first curNumItems slots in
+        // sort order. Once a 2nd ring exists (curNumItems >= 8), ring-2's top
+        // cells sit at very negative y and dominate the head of the sort - so
+        // the center cell (y=0) and everything below it never got filled:
+        // Social's 9-item preview drew at (relative to center) y offsets
+        // [-2p, -1.73p x2, -1.73p/-p/-p, -0.5p x2, 0-far-left] with the true
+        // center empty and the whole bottom half unused, matching William's
+        // "clustered upper-left" screenshot. Fix: SELECT slots ring-by-ring
+        // inner-first (ring 0 center, then each ring's cells clockwise from
+        // 12 o'clock) until curNumItems slots are chosen, and only THEN sort
+        // just those chosen slots by (round(y), x) for reading-order index
+        // assignment. For <= 7 items the chosen set is identical to before
+        // (rings 0+1 fill exactly 7) so the confirmed-good case is unchanged;
+        // above 7 you get complete inner rings plus a partially-filled outer
+        // ring - a centered staggered honeycomb that 9 icons fit in.
         fun honeycombPosition(
             index: Int,
             curNumItems: Int,
@@ -797,30 +832,35 @@ class GridOptions (context: Context) : ModPack(context) {
             isRtl: Boolean
         ): Pair<Float, Float> {
             val maxRing = honeycombRingsNeeded(curNumItems)
-            var cumulative = 1
-            for (ring in 1..maxRing) cumulative += 6 * ring
 
             val cellPitch = iconFootprint + gapPx
             val direction = if (isRtl) -1.0 else 1.0
 
             data class Slot(val x: Float, val y: Float)
 
-            val slots = ArrayList<Slot>(cumulative)
-            slots.add(Slot(0f, 0f)) // ring 0: center
-            for (ring in 1..maxRing) {
+            val chosen = ArrayList<Slot>(curNumItems)
+            if (curNumItems > 0) {
+                chosen.add(Slot(0f, 0f)) // ring 0: center
+            }
+            var remaining = curNumItems - chosen.size
+            var ring = 1
+            while (remaining > 0 && ring <= maxRing) {
                 val cellsInRing = 6 * ring
                 val radius = ring * cellPitch
-                for (pos in 0 until cellsInRing) {
+                val take = min(remaining, cellsInRing)
+                for (pos in 0 until take) {
                     val angle = direction * (2.0 * PI * pos / cellsInRing) - PI / 2.0
-                    slots.add(
+                    chosen.add(
                         Slot((radius * cos(angle)).toFloat(), (radius * sin(angle)).toFloat())
                     )
                 }
+                remaining -= take
+                ring++
             }
 
             // Round y before sorting so slots meant to be in the same row
             // don't get split apart by float rounding noise.
-            val sorted = slots.sortedWith(compareBy({ (it.y * 100f).roundToInt() }, { it.x }))
+            val sorted = chosen.sortedWith(compareBy({ (it.y * 100f).roundToInt() }, { it.x }))
             val slot = sorted.getOrNull(index) ?: sorted.last()
 
             val center = availableSpace / 2f
@@ -966,6 +1006,19 @@ class GridOptions (context: Context) : ModPack(context) {
                     ?.getFieldSilently("mPreviewLayoutRule")
                     ?: return@runAfter
                 lastCurNumItemsByRule[rule] = curNumItems
+                // William, Aug 2026, v49: cache the folder's TOTAL content
+                // count for the getGridPosition stride fix (see the
+                // lastTotalContentsByRule comment above). mInfo.contents is a
+                // plain public ArrayList on FolderInfo, so its size is the
+                // same number AOSP's own setContentSize sizing uses.
+                val contentsList = param.thisObject
+                    .getFieldSilently("mIcon")
+                    ?.getFieldSilently("mInfo")
+                    ?.getFieldSilently("contents") as? List<*>
+                val totalContents = contentsList?.size
+                if (totalContents != null && totalContents > 0) {
+                    lastTotalContentsByRule[rule] = totalContents
+                }
                 if (curNumItems > 4) {
                     log("FlashDebug", "computePreviewItemDrawingParams[fallback] index=$index curNumItems=$curNumItems")
                 }
@@ -1086,14 +1139,37 @@ class GridOptions (context: Context) : ModPack(context) {
                     availableSpace <= 0f || iconSize <= 0f
                 ) return@runAfter
 
-                val (cols, _, basePitch) = gridPitch(curNumItems, availableSpace)
-                if (cols <= 0) return@runAfter
-                val index = row * cols + col
+                val (previewCols, _, basePitch) = gridPitch(curNumItems, availableSpace)
+                if (previewCols <= 0) return@runAfter
+                // William, Aug 2026, v49: reconstruct the reading-order index
+                // using the CALLER'S column count, not this file's preview-count
+                // one. createAnimatorSet calls getGridPosition(row=i/mCountX,
+                // col=i%mCountX) with mCountX taken from a FolderGridOrganizer
+                // sized by TOTAL contents - a value this file's own
+                // setContentSize hook fully controls (ceil(sqrt(total)) capped
+                // at folderGridColumns). The v48 FlashDebug capture proved the
+                // mismatch: Social walks its 11 page icons 4-wide while this
+                // hook reconstructed with gridPitch(9).cols = 3, producing
+                // duplicated indices (3 and 6 twice each) - two pairs of icons
+                // flew to identical destinations mid-close, i.e. the visible
+                // "order goes wrong then fixes" glitch. Replicate the exact
+                // setContentSize formula here against the cached total so both
+                // sides agree; fall back to the preview-derived count when no
+                // total has been seen yet for this rule.
+                val totalContents = lastTotalContentsByRule[param.thisObject]
+                val callerCols = if (totalContents != null && totalContents > 0) {
+                    val needed = ceil(sqrt(totalContents.toDouble())).toInt().coerceAtLeast(1)
+                    if (folderGridColumns != 0) min(needed, folderGridColumns) else needed
+                } else {
+                    previewCols
+                }
+                val index = row * callerCols + col
                 if (index < 0 || index >= curNumItems) {
                     log(
                         "FlashDebug",
                         "getGridPosition: reconstructed index=$index out of range for " +
-                            "curNumItems=$curNumItems (row=$row col=$col cols=$cols) - leaving AOSP's position"
+                            "curNumItems=$curNumItems (row=$row col=$col callerCols=$callerCols) - " +
+                            "leaving AOSP's position"
                     )
                     return@runAfter
                 }
@@ -1107,22 +1183,11 @@ class GridOptions (context: Context) : ModPack(context) {
                 val aospY = fArr[1]
                 fArr[0] = transX
                 fArr[1] = transY
-                // TEMPORARY (William, Aug 2026): added cols=$cols to this line
-                // for the Bug 2 close-glitch diagnosis. createAnimatorSet walks
-                // page icons as getGridPosition(i / organizer.mCountX,
-                // i % organizer.mCountX) - mCountX sized from the folder's
-                // TOTAL contents (e.g. 4 cols for 18 items with the 4x4 toggle)
-                // - while this hook reconstructs the reading-order index using
-                // gridPitch(curNumItems).cols, where curNumItems is the cached
-                // PREVIEW count (e.g. min(9, ...) -> 3 cols). If those two
-                // column counts disagree, the reconstructed index sequence in
-                // this log will visibly scramble (duplicates/skips across
-                // consecutive row/col calls), confirming the stride-mismatch
-                // theory directly. Remove "cols=" once diagnosed.
                 log(
                     "FlashDebug",
-                    "getGridPosition(row=$row, col=$col) curNumItems=$curNumItems cols=$cols " +
-                        "index=$index -> aosp=($aospX, $aospY) ours=($transX, $transY)"
+                    "getGridPosition(row=$row, col=$col) curNumItems=$curNumItems " +
+                        "callerCols=$callerCols previewCols=$previewCols index=$index -> " +
+                        "aosp=($aospX, $aospY) ours=($transX, $transY)"
                 )
             }
 
