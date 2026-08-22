@@ -971,7 +971,32 @@ class GridOptions (context: Context) : ModPack(context) {
                 }
                 if (index < 0) return@runAfter // workspace destroy/create animation, not a grid slot
                 if (curNumItems <= 4) return@runAfter
+                // TEMPORARY (William, Aug 2026): HoneycombDebug diagnostics for
+                // Bug 1 ("Social" folder honeycomb renders clustered in the
+                // upper-left above 7 items). For every grid-slot call this
+                // prints index, curNumItems, what AOSP's own method body just
+                // computed into the result params BEFORE our override runs
+                // (for index >= 4 that should be AOSP's corner-stacking point,
+                // i.e. all three values identical), and what
+                // repositionPreviewItemAsGrid left behind AFTER - so the log
+                // directly shows (a) the folder's real curNumItems, (b) whether
+                // any grid slot is skipped or silently not overridden (post ==
+                // pre means repositionPreviewItemAsGrid bailed early for that
+                // index, e.g. null/zero mAvailableSpace). Capture with:
+                //   adb logcat -d -s HoneycombDebug:V > log.txt
+                // Remove this whole block once Bug 1 is confirmed fixed.
+                val preOverrideX = param.result?.getFieldSilently("transX")
+                val preOverrideY = param.result?.getFieldSilently("transY")
+                val preOverrideScale = param.result?.getFieldSilently("scale")
                 repositionPreviewItemAsGrid(rule, index, curNumItems, param.result)
+                log(
+                    "HoneycombDebug",
+                    "computePreview[index=$index curNumItems=$curNumItems] " +
+                        "aospPre=(x=$preOverrideX, y=$preOverrideY, scale=$preOverrideScale) -> " +
+                        "oursPost=(x=${param.result?.getFieldSilently("transX")}, " +
+                        "y=${param.result?.getFieldSilently("transY")}, " +
+                        "scale=${param.result?.getFieldSilently("scale")})"
+                )
             }
 
         // Fixes the open/close "flash": FolderAnimationManager.getAnimator()
@@ -1082,10 +1107,22 @@ class GridOptions (context: Context) : ModPack(context) {
                 val aospY = fArr[1]
                 fArr[0] = transX
                 fArr[1] = transY
+                // TEMPORARY (William, Aug 2026): added cols=$cols to this line
+                // for the Bug 2 close-glitch diagnosis. createAnimatorSet walks
+                // page icons as getGridPosition(i / organizer.mCountX,
+                // i % organizer.mCountX) - mCountX sized from the folder's
+                // TOTAL contents (e.g. 4 cols for 18 items with the 4x4 toggle)
+                // - while this hook reconstructs the reading-order index using
+                // gridPitch(curNumItems).cols, where curNumItems is the cached
+                // PREVIEW count (e.g. min(9, ...) -> 3 cols). If those two
+                // column counts disagree, the reconstructed index sequence in
+                // this log will visibly scramble (duplicates/skips across
+                // consecutive row/col calls), confirming the stride-mismatch
+                // theory directly. Remove "cols=" once diagnosed.
                 log(
                     "FlashDebug",
-                    "getGridPosition(row=$row, col=$col) curNumItems=$curNumItems index=$index -> " +
-                        "aosp=($aospX, $aospY) ours=($transX, $transY)"
+                    "getGridPosition(row=$row, col=$col) curNumItems=$curNumItems cols=$cols " +
+                        "index=$index -> aosp=($aospX, $aospY) ours=($transX, $transY)"
                 )
             }
 
