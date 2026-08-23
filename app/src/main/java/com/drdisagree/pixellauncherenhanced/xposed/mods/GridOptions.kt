@@ -751,10 +751,19 @@ class GridOptions (context: Context) : ModPack(context) {
 
         // Concentric hex rings around a filled center cell (ring 0 = 1 cell,
         // ring k = 6k cells; cumulative through ring k = 1+3k(k+1)) - a
-        // "honeycomb/flower" cluster instead of a square grid or single
-        // ring. William, Aug 2026: requested after "circle" (a single even
-        // ring) turned out not to be what he meant by an octagon/hexagon
-        // arrangement - this is a closer match to an actual honeycomb look.
+        // "flower" cluster instead of a square grid or single ring.
+        // William, Aug 2026, v51: this layout was previously THE "honeycomb"
+        // shape. On-device testing settled it the other way: what William
+        // means by honeycomb is a STAGGERED row packing (see
+        // staggeredHoneycombPosition below), and this radial rings look is
+        // its own thing - so it now lives under a separate "flower" entry in
+        // the TEMP shape dropdown ("you can keep the flower pattern just add
+        // it as a new option in temp, but the flower pattern should not be
+        // the pattern for honeycomb"). Everything below is unchanged from the
+        // v49/v50 ring implementation otherwise.
+        // William, Aug 2026: originally requested after "circle" (a single
+        // even ring) turned out not to be what he meant by an octagon/hexagon
+        // arrangement.
         // Items within a ring are still evenly spaced by angle (not true
         // axial hex-cell placement) - simpler, and visually reads the same
         // for a folder preview's purposes.
@@ -782,7 +791,7 @@ class GridOptions (context: Context) : ModPack(context) {
         //    + gapPx instead (same idea "list" shape already uses) so
         //    adjacent rings can never be closer than the icons themselves.
         // Number of concentric hex rings needed to hold curNumItems (ring 0 =
-        // 1 center cell, ring k adds 6k cells). Shared by honeycombPosition
+        // 1 center cell, ring k adds 6k cells). Shared by flowerPosition
         // (arrangement) and iconFootprintFor (sizing) so the two can never
         // disagree on how many rings a given item count needs.
         fun honeycombRingsNeeded(curNumItems: Int): Int {
@@ -799,12 +808,11 @@ class GridOptions (context: Context) : ModPack(context) {
         // William confirmed it doesn't read as honeycomb ("try and keep it
         // a honeycomb shape"), so this goes back to true concentric hex
         // rings (fixed 6 cells in ring 1, 12 in ring 2, etc. - the actual
-        // honeycomb/flower structure) for the ARRANGEMENT. What's kept from
-        // v3 is only the sizing fix in honeycombIconFootprint below, which
-        // is what actually solved "renders outside the folder" - shrinking
-        // icons enough that ring 2 (needed at 8+ items) still fits inside
-        // availableSpace, rather than reusing the unrelated square-grid
-        // icon size. So: real honeycomb shape, correctly bounded size.
+        // flower structure) for the ARRANGEMENT. What's kept from v3 is only
+        // the sizing fix in flowerIconFootprint below, which is what actually
+        // solved "renders outside the folder" - shrinking icons enough that
+        // ring 2 (needed at 8+ items) still fits inside availableSpace,
+        // rather than reusing the unrelated square-grid icon size.
         // William, Aug 2026, v5: fixed slot SELECTION above 7 items (the v48
         // HoneycombDebug log confirmed this exactly). The old code generated
         // ALL slots for maxRing rings, sorted every one of them by (y, x),
@@ -822,8 +830,10 @@ class GridOptions (context: Context) : ModPack(context) {
         // assignment. For <= 7 items the chosen set is identical to before
         // (rings 0+1 fill exactly 7) so the confirmed-good case is unchanged;
         // above 7 you get complete inner rings plus a partially-filled outer
-        // ring - a centered staggered honeycomb that 9 icons fit in.
-        fun honeycombPosition(
+        // ring - a centered flower that 9 icons fit in.
+        // William, Aug 2026, v51: renamed honeycombPosition -> flowerPosition
+        // when the ring layout moved to its own shape option.
+        fun flowerPosition(
             index: Int,
             curNumItems: Int,
             availableSpace: Float,
@@ -899,6 +909,71 @@ class GridOptions (context: Context) : ModPack(context) {
             return (center + slot.x - halfIcon) to (center + slot.y - halfIcon)
         }
 
+        // William, Aug 2026, v51: THE honeycomb shape. Staggered row packing
+        // - what William actually means by honeycomb ("some sort of
+        // staggered honeycomb-like thing that 9 app icons can fit in"), as
+        // clarified when the old ring layout moved to its own "flower"
+        // option. Rows are balanced to within one icon of each other and
+        // every second row is shifted sideways by half a cell, so the cluster
+        // reads as offset honeycomb cells instead of a square grid:
+        //   9 icons -> 3 / 3 / 3 with the middle row nudged right
+        //   7 icons -> 3 / 2 / 2
+        //  11 icons -> 4 / 4 / 3
+        // Reading order is simply row-major over those rows (top-to-bottom,
+        // left-to-right) - no sorting gymnastics needed since rows are built
+        // in reading order directly.
+        //
+        // Sizing: unlike the flower's rings, this arrangement's extent is
+        // naturally bounded by availableSpace (same property the square grid
+        // has), so it reuses the ordinary square-grid footprint - which is
+        // also why it fixes "at 9 it's like it's scaling the size for way
+        // more apps": no ring-2 radius means no dramatic shrink.
+        fun staggeredHoneycombPosition(
+            index: Int,
+            curNumItems: Int,
+            availableSpace: Float,
+            iconFootprint: Float,
+            gapPx: Float,
+            isRtl: Boolean
+        ): Pair<Float, Float> {
+            val (_, rows, basePitch) = gridPitch(curNumItems, availableSpace)
+            val pitch = basePitch + gapPx
+            // True hex packing stacks rows at sqrt(3)/2 ~= 0.87 of the
+            // horizontal pitch; keeps the staggered look without wasting
+            // vertical space.
+            val rowHeight = pitch * 0.87f
+
+            val baseCount = curNumItems / rows
+            val extraRows = curNumItems % rows
+
+            // Walk rows in reading order until we find the one holding
+            // `index`. Wider rows go on top (extras distributed top-first).
+            var remainingIndex = index
+            var rowIndex = 0
+            var colsInRow = 0
+            while (rowIndex < rows) {
+                colsInRow = baseCount + if (rowIndex < extraRows) 1 else 0
+                if (remainingIndex < colsInRow) break
+                remainingIndex -= colsInRow
+                rowIndex++
+            }
+            val colInRow = remainingIndex
+
+            val stagger = if (rowIndex % 2 == 1) pitch / 2f else 0f
+            // Center each row INCLUDING its stagger extent - this is why the
+            // shifted middle row of a 3/3/3 layout can never overflow the
+            // folder's bounds: the row's own content box is always <=
+            // availableSpace wide.
+            val contentWidth =
+                ((colsInRow - 1) * pitch + stagger + iconFootprint).coerceAtMost(availableSpace)
+            var x = (availableSpace - contentWidth) / 2f + colInRow * pitch + stagger
+            val totalHeight = (rows - 1) * rowHeight + iconFootprint
+            val y = (availableSpace - totalHeight) / 2f + rowIndex * rowHeight
+
+            if (isRtl) x = availableSpace - x - iconFootprint
+            return x to y
+        }
+
         // Single place both the closed-preview draw path
         // (repositionPreviewItemAsGrid) and the open/close animation path
         // (the getGridPosition hook below) pick a shape from, so the two
@@ -922,33 +997,39 @@ class GridOptions (context: Context) : ModPack(context) {
         ): Pair<Float, Float> = when (folderPreviewShapeTemp) {
             "circle" -> circlePosition(index, curNumItems, availableSpace, iconFootprint, gapPx, isRtl)
             "list" -> gridPosition(index, curNumItems, availableSpace, iconFootprint, gapPx, isRtl, forcedCols = 2)
-            "honeycomb" -> honeycombPosition(index, curNumItems, availableSpace, iconFootprint, gapPx, isRtl)
+            "honeycomb" -> staggeredHoneycombPosition(index, curNumItems, availableSpace, iconFootprint, gapPx, isRtl)
+            "flower" -> flowerPosition(index, curNumItems, availableSpace, iconFootprint, gapPx, isRtl)
             else -> gridPosition(index, curNumItems, availableSpace, iconFootprint, gapPx, isRtl, forcedCols = null)
         }
 
-        // William, Aug 2026, v4: back to true concentric hex rings for the
-        // SHAPE (see honeycombPosition above), but this sizing fix from v3
-        // is kept - it's what actually solved "renders outside the folder"
-        // above 7 items. Every other shape (grid/circle/list) draws its
-        // icons at the square-grid's own footprint (basePitch *
-        // sizeFactorFor) - fine for them, since their arrangement's own
-        // extent is already bounded by availableSpace. Honeycomb's ring
-        // layout is NOT bounded the same way: reusing the square-grid
-        // footprint meant ring 2 (needed once curNumItems >= 8) could have
-        // a radius (2 * (iconFootprint + gapPx)) far exceeding
-        // availableSpace/2, pushing those icons outside the folder
-        // entirely. Fix: solve for the largest iconFootprint such that the
-        // OUTERMOST ring's icon edge still lands inside availableSpace -
+        // William, Aug 2026, v51: this sizing cap now belongs to the FLOWER
+        // shape only (renamed from honeycombIconFootprint when the two
+        // shapes split). Back at v4 it returned to true concentric hex rings
+        // for the SHAPE, keeping the v3 sizing fix - which is what actually
+        // solved "renders outside the folder" above 7 items. Every other
+        // shape (grid/circle/list/honeycomb) draws its icons at the
+        // square-grid's own footprint (basePitch * sizeFactorFor) - fine for
+        // them, since their arrangement's own extent is already bounded by
+        // availableSpace. The flower's ring layout is NOT bounded the same
+        // way: reusing the square-grid footprint meant ring 2 (needed once
+        // curNumItems >= 8) could have a radius (2 * (iconFootprint + gapPx))
+        // far exceeding availableSpace/2, pushing those icons outside the
+        // folder entirely. Fix: solve for the largest iconFootprint such that
+        // the OUTERMOST ring's icon edge still lands inside availableSpace -
         // maxRing * (iconFootprint + gapPx) + iconFootprint / 2 <=
         // availableSpace / 2 - then take whichever is SMALLER of that and
         // the ordinary square-grid footprint, so the already-confirmed
         // -working single-ring case (<=7 items) is completely unchanged
         // (the square-grid footprint is already the tighter bound there) -
         // only the 2-plus-ring case (8+ items) actually shrinks, exactly as
-        // much as needed to stay inside the folder and no more.
-        fun honeycombIconFootprint(curNumItems: Int, availableSpace: Float, gapPx: Float): Float {
+        // much as needed to stay inside the folder and no more. (That shrink
+        // is also the "at 9 it's like it's scaling the size for way more
+        // apps" William reported - inherent to radial rings needing a much
+        // wider bounding circle than staggered rows; picking Flower is
+        // opting into it.)
+        fun flowerIconFootprint(curNumItems: Int, availableSpace: Float, gapPx: Float): Float {
             val maxRing = honeycombRingsNeeded(curNumItems)
-            if (maxRing < 2) return Float.MAX_VALUE // no honeycomb-specific cap needed yet
+            if (maxRing < 2) return Float.MAX_VALUE // no flower-specific cap needed yet
 
             return ((availableSpace / 2f - maxRing * gapPx) / (maxRing + 0.5f))
                 .coerceAtLeast(0f)
@@ -961,9 +1042,9 @@ class GridOptions (context: Context) : ModPack(context) {
             basePitch: Float
         ): Float {
             val gridFootprint = basePitch * sizeFactorFor(curNumItems)
-            if (folderPreviewShapeTemp != "honeycomb") return gridFootprint
+            if (folderPreviewShapeTemp != "flower") return gridFootprint
 
-            val maxFootprint = honeycombIconFootprint(curNumItems, availableSpace, gapPx)
+            val maxFootprint = flowerIconFootprint(curNumItems, availableSpace, gapPx)
             return min(gridFootprint, maxFootprint * sizeFactorFor(curNumItems))
         }
 

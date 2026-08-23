@@ -36,6 +36,7 @@
         <item>Circle</item>
         <item>List (2 columns)</item>
         <item>Honeycomb</item>
+        <item>Flower (rings)</item>
     </string-array>
 
     <string-array name="folder_preview_shape_temp_value">
@@ -43,6 +44,7 @@
         <item>circle</item>
         <item>list</item>
         <item>honeycomb</item>
+        <item>flower</item>
     </string-array>
 
     <!-- William, Aug 2026: where the Uninstall context-menu entry shows up. -->
