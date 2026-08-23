@@ -860,7 +860,38 @@ class GridOptions (context: Context) : ModPack(context) {
 
             // Round y before sorting so slots meant to be in the same row
             // don't get split apart by float rounding noise.
-            val sorted = chosen.sortedWith(compareBy({ (it.y * 100f).roundToInt() }, { it.x }))
+            //
+            // William, Aug 2026, v50: one refinement from on-device testing of
+            // v49 ("the last two icons that show, bottom middle and bottom
+            // right, appear to be flipped"). Strict (y, x) ordering breaks for
+            // STAGGERED bottoms: with 9 chosen slots the bottom band is
+            // ring-1's lower pair at y=+0.5*pitch plus ring-1's bottom cell at
+            // y=+1.0*pitch sitting horizontally BETWEEN them - visually one
+            // row reading left/middle/right, but strict y puts the middle
+            // cell LAST, swapping the final two icons. Fix: group slots into
+            // exact-y bands as before, then if the LAST band is a singleton
+            // hanging less than 0.6*cellPitch below the band above it, merge
+            // it into that band and re-sort by x. The 7-item case is
+            // untouched (its last band is a PAIR, not a singleton), and the
+            // top edge keeps strict order (William confirmed the 9-icon top
+            // reads correctly as-is).
+            val strictOrder = chosen.sortedWith(compareBy({ (it.y * 100f).roundToInt() }, { it.x }))
+            val bands = LinkedHashMap<Int, MutableList<Slot>>()
+            for (slot in strictOrder) {
+                bands.getOrPut((slot.y * 100f).roundToInt()) { mutableListOf() }.add(slot)
+            }
+            if (bands.size >= 2) {
+                val bandKeys = bands.keys.toList()
+                val lastBand = bands[bandKeys[bandKeys.size - 1]]!!
+                val prevBand = bands[bandKeys[bandKeys.size - 2]]!!
+                val dropBelowPrev = lastBand[0].y - (prevBand.minOf { it.y })
+                if (lastBand.size == 1 && dropBelowPrev in 0f..(0.6f * cellPitch)) {
+                    prevBand.add(lastBand[0])
+                    prevBand.sortBy { it.x }
+                    bands.remove(bandKeys[bandKeys.size - 1])
+                }
+            }
+            val sorted = bands.values.flatten()
             val slot = sorted.getOrNull(index) ?: sorted.last()
 
             val center = availableSpace / 2f
@@ -1163,15 +1194,25 @@ class GridOptions (context: Context) : ModPack(context) {
                 } else {
                     previewCols
                 }
-                val index = row * callerCols + col
-                if (index < 0 || index >= curNumItems) {
+                // William, Aug 2026, v50: page icons beyond the preview cap
+                // used to hit this bail and KEEP AOSP's raw extrapolated
+                // coordinates - which extend up to ~2x beyond availableSpace,
+                // so those icons visibly swung OUTSIDE the closed folder's
+                // area during close (William: "the tiniest sliver of something
+                // outside the folder that shows for half a second"; the v49
+                // log showed 54 such bails, and adding an 8th app to a 7-app
+                // folder resurrected the glitch by creating exactly one).
+                // Clamp instead: out-of-preview icons converge onto the last
+                // preview slot, staying inside the folder for the morph.
+                val indexInBounds = row * callerCols + col
+                val index = indexInBounds.coerceIn(0, curNumItems - 1)
+                if (indexInBounds != index) {
                     log(
                         "FlashDebug",
-                        "getGridPosition: reconstructed index=$index out of range for " +
+                        "getGridPosition: index=$indexInBounds out of range for " +
                             "curNumItems=$curNumItems (row=$row col=$col callerCols=$callerCols) - " +
-                            "leaving AOSP's position"
+                            "clamping to $index"
                     )
-                    return@runAfter
                 }
 
                 val gapPx = effectiveGapPx()
@@ -1191,37 +1232,22 @@ class GridOptions (context: Context) : ModPack(context) {
                 )
             }
 
-        // Close-animation "glitch" fix (William, Aug 2026). Confirmed via
-        // the full decompiled source of FolderAnimationSpringBuilderManager.
-        // createAnimatorSet: FolderGridOrganizer.previewItemsForPage always
-        // hard-caps at 4 items (the same AOSP MAX_NUM_ITEMS_IN_PREVIEW quirk
-        // documented above), and every icon on the current page that ISN'T
-        // one of those 4 gets an EXTRA spring animation on top of its normal
-        // translate/scale move: a VIEW_ALPHA fade targeting the icon view
-        // itself (distinct from the footer/folder-name/scrim alpha fades,
-        // which use the same FloatProperty but different targets - filtered
-        // out below by checking the target's class). For closing this fades
-        // 1.0 -> 0.0, with each icon's delay spread up to size*5 ms based on
-        // its reading-order position - so different icons vanish at
-        // different times mid-close - and a later onAnimationEnd listener
-        // then snaps every icon's alpha back to 1.0 instantly once the whole
-        // AnimatorSet finishes. That per-icon fade-to-invisible followed by
-        // an instant snap-back is exactly what shows up as "some icons
-        // disappear / order looks wrong, then it corrects itself half a
-        // second later" - and only on folders with more than 4 items on a
-        // page, matching William's report (18-icon 4x4 folder glitches;
-        // his smaller 7-9 item single-page folders animate smoothly).
-        // Suppressed only for the CLOSING direction (isOpening == false) -
-        // the identical fade plays a deliberate reveal effect on OPEN, which
-        // wasn't part of what William asked to fix, so it's left untouched
-        // to minimize behavior change. Skipped via param.result = null (a
-        // void method), the same skip-the-original pattern already used
-        // elsewhere in this codebase (e.g. TopShadow.kt's
-        // onViewAttachedToWindow hook).
-        val launcherAnimUtilsClass = findClass(
-            "com.android.launcher3.LauncherAnimUtils",
-            suppressError = true
-        )
+        // Close-animation "glitch" fix (William, Aug 2026), history:
+        // Round 1 (v-something) suppressed the close-direction VIEW_ALPHA
+        // fade that AOSP plays for every page icon NOT in the preview list,
+        // and round 2 zeroed the per-icon stagger delay on the remaining
+        // icon-view springs. Neither cured William's "order goes wrong then
+        // fixes itself" close glitch. The v48/v49 FlashDebug captures proved
+        // why: the REAL cause was the getGridPosition stride mismatch fixed
+        // in v49 - icons were being handed duplicated/scrambled destinations,
+        // so the closing morph visibly scrambled regardless of what the
+        // springs played. With destinations now correct, round 1's
+        // suppression is REVERTED (v50): AOSP's own design fades non-preview
+        // icons out during close so they don't pile up or escape the folder
+        // bounds, and its original "icons vanish then snap back" symptom was
+        // an artifact of those same wrong destinations, not of the fade.
+        // Round 2's stagger-zeroing stays, so everything on a closing icon
+        // view (alpha included now) animates in lockstep.
         val bubbleTextViewClass = findClass(
             "com.android.launcher3.BubbleTextView",
             suppressError = true
@@ -1230,7 +1256,6 @@ class GridOptions (context: Context) : ModPack(context) {
             "com.android.launcher3.apppairs.AppPairIcon",
             suppressError = true
         )
-        val viewAlphaProperty = launcherAnimUtilsClass?.getStaticFieldSilently("VIEW_ALPHA")
         val folderSpringAnimatorSetFactoryClass = findClass(
             $$"com.android.launcher3.folder.FolderSpringAnimatorSet$Factory",
             suppressError = true
@@ -1269,23 +1294,10 @@ class GridOptions (context: Context) : ModPack(context) {
                     appPairIconClass?.isInstance(target) == true
                 if (!isIconView) return@runBefore
 
-                val floatProperty = param.args.getOrNull(9)
-                if (viewAlphaProperty != null && floatProperty === viewAlphaProperty) {
-                    // Extra alpha fade for icons beyond the hardcoded
-                    // 4-item preview cap - still suppressed entirely (round
-                    // 1's fix): without this, non-preview icons visibly
-                    // fade to invisible then instantly snap back to
-                    // visible once the whole AnimatorSet completes.
-                    log(
-                        "FlashDebug",
-                        "playSpringAnimation: suppressing close-direction icon alpha fade for ${target.javaClass.name}"
-                    )
-                    param.result = null
-                    return@runBefore
-                }
-
-                // Every other per-icon spring (translateX/Y, scale): keep
-                // playing it, just remove its stagger by zeroing the delay.
+                // Every per-icon view spring on close (alpha now included -
+                // round 1's suppression was reverted in v50, see the comment
+                // block above): keep playing it, just remove its stagger by
+                // zeroing the delay so all icons animate in lockstep.
                 val delay = param.args.getOrNull(3) as? Int
                 if (delay != null && delay != 0) {
                     param.args[3] = 0
