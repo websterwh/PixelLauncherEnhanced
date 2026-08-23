@@ -909,19 +909,26 @@ class GridOptions (context: Context) : ModPack(context) {
             return (center + slot.x - halfIcon) to (center + slot.y - halfIcon)
         }
 
-        // William, Aug 2026, v51: THE honeycomb shape. Staggered row packing
-        // - what William actually means by honeycomb ("some sort of
-        // staggered honeycomb-like thing that 9 app icons can fit in"), as
-        // clarified when the old ring layout moved to its own "flower"
-        // option. Rows are balanced to within one icon of each other and
-        // every second row is shifted sideways by half a cell, so the cluster
-        // reads as offset honeycomb cells instead of a square grid:
-        //   9 icons -> 3 / 3 / 3 with the middle row nudged right
-        //   7 icons -> 3 / 2 / 2
-        //  11 icons -> 4 / 4 / 3
-        // Reading order is simply row-major over those rows (top-to-bottom,
-        // left-to-right) - no sorting gymnastics needed since rows are built
-        // in reading order directly.
+        // William, Aug 2026, v51: THE honeycomb shape. Tapered hexagon pile
+        // on a staggered lattice. History of getting here:
+        // - v51 first attempt: equal-width rows with ONLY the middle row
+        //   shifted half a cell - William rejected it on sight ("thats not
+        //   honeycomb thats more like a cheveron. it should be similar to an
+        //   octagon or hexagon") - a single poked-out row reads as an arrow,
+        //   not a cluster.
+        // - v52 (this): rows taper toward the edges (widest row(s) in the
+        //   middle, extras distributed center-out) and EVERY row is staggered
+        //   alternately by a quarter pitch around center, so adjacent rows
+        //   sit half-a-cell offset - the "rows weren't straight" honeycomb
+        //   lattice look from the arrangement William referenced (the v48-era
+        //   ring-slot rows), but centered and complete:
+        //     7 -> 2/3/2   (classic hexagon)
+        //     8 -> 3/3/2
+        //     9 -> 3/3/3   (subtly staggered, no row pokes out alone)
+        //    11 -> 3/3/3/2
+        //    16 -> 4/4/4/4
+        // Reading order is simply row-major (top-to-bottom, left-to-right)
+        // since rows are built in reading order directly - no sorting.
         //
         // Sizing: unlike the flower's rings, this arrangement's extent is
         // naturally bounded by availableSpace (same property the square grid
@@ -939,33 +946,46 @@ class GridOptions (context: Context) : ModPack(context) {
             val (_, rows, basePitch) = gridPitch(curNumItems, availableSpace)
             val pitch = basePitch + gapPx
             // True hex packing stacks rows at sqrt(3)/2 ~= 0.87 of the
-            // horizontal pitch; keeps the staggered look without wasting
+            // horizontal pitch; keeps the lattice look without wasting
             // vertical space.
             val rowHeight = pitch * 0.87f
 
             val baseCount = curNumItems / rows
             val extraRows = curNumItems % rows
 
-            // Walk rows in reading order until we find the one holding
-            // `index`. Wider rows go on top (extras distributed top-first).
+            // Widths per row: base everywhere, +1 for the `extraRows` rows
+            // NEAREST THE MIDDLE (center-out), so the pile tapers toward top
+            // and bottom edges - the hexagon/octagon silhouette William
+            // described - instead of stepping down on one side.
+            val rowWidths = IntArray(rows) { baseCount }
+            val center = (rows - 1) / 2f
+            val rowsByCenterDistance = (0 until rows).sortedWith(
+                compareBy({ Math.abs(it - center) }, { it })
+            )
+            for (i in 0 until extraRows) {
+                rowWidths[rowsByCenterDistance[i]]++
+            }
+
+            // Find this index's row/col by walking the widths in reading
+            // order.
             var remainingIndex = index
             var rowIndex = 0
             var colsInRow = 0
             while (rowIndex < rows) {
-                colsInRow = baseCount + if (rowIndex < extraRows) 1 else 0
+                colsInRow = rowWidths[rowIndex]
                 if (remainingIndex < colsInRow) break
                 remainingIndex -= colsInRow
                 rowIndex++
             }
             val colInRow = remainingIndex
 
-            val stagger = if (rowIndex % 2 == 1) pitch / 2f else 0f
-            // Center each row INCLUDING its stagger extent - this is why the
-            // shifted middle row of a 3/3/3 layout can never overflow the
-            // folder's bounds: the row's own content box is always <=
-            // availableSpace wide.
+            // Alternate rows by a quarter pitch around center: adjacent rows
+            // end up half-a-cell offset (true honeycomb lattice), while the
+            // whole cluster stays balanced - no single row pokes out on one
+            // side, which is exactly what read as a "chevron" in v51.
+            val stagger = if (rowIndex % 2 == 0) -pitch / 4f else pitch / 4f
             val contentWidth =
-                ((colsInRow - 1) * pitch + stagger + iconFootprint).coerceAtMost(availableSpace)
+                ((colsInRow - 1) * pitch + iconFootprint).coerceAtMost(availableSpace)
             var x = (availableSpace - contentWidth) / 2f + colInRow * pitch + stagger
             val totalHeight = (rows - 1) * rowHeight + iconFootprint
             val y = (availableSpace - totalHeight) / 2f + rowIndex * rowHeight
