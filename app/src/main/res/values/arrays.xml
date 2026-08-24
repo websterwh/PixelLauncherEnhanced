@@ -30,13 +30,13 @@
     </string-array>
 
     <!-- TEMPORARY (William, Aug 2026): see FOLDER_PREVIEW_SHAPE_TEMP in
-         Constants.kt for removal instructions. -->
+         Constants.kt for removal instructions. "flower" was merged back
+         into "honeycomb" in v53 (one center + single adaptive ring). -->
     <string-array name="folder_preview_shape_temp_str">
         <item>Grid (square)</item>
         <item>Circle</item>
         <item>List (2 columns)</item>
         <item>Honeycomb</item>
-        <item>Flower (rings)</item>
     </string-array>
 
     <string-array name="folder_preview_shape_temp_value">
@@ -44,7 +44,6 @@
         <item>circle</item>
         <item>list</item>
         <item>honeycomb</item>
-        <item>flower</item>
     </string-array>
 
     <!-- William, Aug 2026: where the Uninstall context-menu entry shows up. -->
