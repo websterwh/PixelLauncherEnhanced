@@ -16,6 +16,7 @@ import com.drdisagree.pixellauncherenhanced.xposed.mods.HotseatMod
 import com.drdisagree.pixellauncherenhanced.xposed.mods.IconLabels
 import com.drdisagree.pixellauncherenhanced.xposed.mods.IconTextSize
 import com.drdisagree.pixellauncherenhanced.xposed.mods.IconUpdater
+import com.drdisagree.pixellauncherenhanced.xposed.mods.ImportExportMod
 import com.drdisagree.pixellauncherenhanced.xposed.mods.LauncherSettings
 import com.drdisagree.pixellauncherenhanced.xposed.mods.LauncherUtils
 import com.drdisagree.pixellauncherenhanced.xposed.mods.LockLayout
@@ -52,6 +53,7 @@ object EntryList {
         DrawerSearchbar::class.java,
         ClearAllButton::class.java,
         GridOptions::class.java,
+        ImportExportMod::class.java,
         HideApps::class.java,
         ShortcutBadge::class.java,
         WallpaperZoom::class.java,
