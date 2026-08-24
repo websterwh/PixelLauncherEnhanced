@@ -1,0 +1,236 @@
+# PLEnhanced Fork — Project Context
+
+Everything an agent or human needs to continue this project from scratch.
+Read this before touching anything. Companion docs: `AGENTS.md` (rules of
+engagement), `CLAUDE.md` (pointer file for Claude Code).
+
+Last updated: Aug 24, 2026. Current release: **v1.2.0 (versionCode 6)**,
+branch `layout-tweaks`.
+
+---
+
+## 1. What this is
+
+William's fork of [PixelLauncherEnhanced](https://github.com/DrDisagree/PixelLauncherEnhanced)
+(PLE) — an Xposed/LSPosed module that hooks Google's Pixel Launcher
+(`com.google.android.apps.nexuslauncher`, APK `NexusLauncherRelease` in
+`/system_ext/priv-app/`). The fork's work:
+
+1. **Folder closed-preview layout** — fixed for >4 icons and locked to a
+   stock-matched square grid (all experimental shapes removed).
+2. **Open/close animation fixes** — correct icon destinations/order, no
+   sliver outside the folder, no "only 4 icons animate" pop-in.
+3. **Working Import/Export** — the launcher's hidden dev-options Import
+   button is dead in stock; this fork makes it fully work, including
+   widgets.
+
+Everything else in PLE (dock columns, drawer columns, 4x4 toggle, preview
+count, etc.) is upstream functionality and still works.
+
+## 2. Environment
+
+- **Device**: rooted Pixel, 4x6 home grid, launcher db is
+  `launcher_4_by_6.db`. Connected via adb throughout development.
+- **Module host**: LSPosed. In logcat the module's output appears under a
+  bridge tag (e.g. `VectorLegacyBridge`), NOT under the tag passed to the
+  toolkit `log(tag, msg)` — the tag ends up in the message text as
+  `[PLEnhanced] <tag> => ...`. **To capture module logs: `adb logcat -d >
+  full.txt` then `findstr "SomeTag" full.txt`.** Filtering with
+  `logcat -s SomeTag` yields nothing.
+- **Decompiled launcher source** was the evidence base for every hook
+  (jadx on the pulled `NexusLauncherRelease.apk`). Class/method names in
+  this launcher build are NOT obfuscated.
+
+### Build
+
+```
+cd PixelLauncherEnhanced
+.\gradlew.bat assembleRelease     # signed release (R8 minified, ~2.6 MB)
+.\gradlew.bat assembleDebug       # debug build (~10 MB)
+```
+
+- Release signing reads `keystore.properties` (repo root, **gitignored**)
+  → keystore at
+  `C:\Users\William\Documents\projects\android\.KEYS\PixelLauncherEnhanced\PLEnhanced.jks`
+  (alias `pleenhanced`, RSA-4096, ~30y). **That folder must be backed up** —
+  lose it and no future APK updates over this signature.
+- Without `keystore.properties` the build falls back to debug signing
+  (CI-style). Debug- and release-signed builds cannot install over each
+  other; switching requires `adb uninstall` (module settings are lost —
+  folder-preview tuning is hardcoded so nothing important resets).
+- Install + restart:
+  ```
+  adb install -r "<apk>"
+  adb shell am force-stop com.google.android.apps.nexuslauncher
+  ```
+  Note: `force-stop` can leave the recents/app-switcher half-dead (blank
+  task previews and names, dead dropdown). A reboot fixes it. This was
+  mistaken for a module bug once — it isn't.
+
+### Deliverable convention
+
+Current APK kept at the workspace root:
+`PLEnhanced-v1.2.0-release-signed.apk`. Historical per-round APKs/patches
+were deleted; every round is reproducible from git history (branch
+`layout-tweaks`, commit messages `vNN: description`).
+
+## 3. Architecture
+
+- Entry: `xposed/HookEntry.kt` → `EntryList.kt` lists `ModPack` classes per
+  package. Folder-preview + import/export mods: `xposed/mods/GridOptions.kt`
+  (~900 lines) and `xposed/mods/ImportExportMod.kt`.
+- Toolkit (`xposed/mods/toolkit/`): `findClass`, `hookMethod(...).runBefore/
+  runAfter`, `getFieldSilently`, `callMethodSilently`, `getStaticFieldSilently`,
+  `log`. `hookMethod("name")` hooks ALL overloads by name.
+- Root access from inside the launcher process:
+  `HookEntry.enqueueProxyCommand { proxy -> proxy.runCommand("...") }`
+  (libsu root service; used for the post-import `killall`).
+- Prefs: `Xprefs` (remote preferences). Constants in
+  `data/common/Constants.kt`. Settings UI: `res/xml/*.xml` + fragments.
+
+### Folder preview (GridOptions.kt) — final design
+
+For `curNumItems > 4` (else stock AOSP path):
+
+- **Grid only.** cols = `ceil(sqrt(n))` capped by the 4x4 toggle's
+  `folderGridColumns` (same cap applied to the open folder via the
+  `setContentSize` hook), rows analogous.
+- **Stock-anchored constants** (the "claude math"): stock draws its 4-icon
+  preview at `0.44 * availableSpace` per icon; solving our
+  `footprint = (availableSpace / max(cols,rows)) * spacing * size` for the
+  4-icon-as-2x2 case gives `spacing * size = 0.88`. Baked as
+  `DEFAULT_SPACING_FACTOR = 0.88`, `DEFAULT_SIZE_FACTOR = 1.0`,
+  `DEFAULT_GAP_DP = 2` (flat gap, William's taste; stock implies 0).
+- Hook set:
+  - `computePreviewItemDrawingParams` (rule class + PreviewItemManager
+    fallback path — some builds inline the rule's method) →
+    `repositionPreviewItemAsGrid` writes transX/transY/scale.
+  - `scaleForItem` → animation scale agrees with the draw path.
+  - `getGridPosition` (ClippedFolderIconLayoutRule) → open/close animation
+    destinations use OUR position math (see Bug 2 below).
+  - `playSpringAnimation` (FolderSpringAnimatorSet$Factory) → zero the
+    per-icon stagger delay on CLOSE so all icons move in lockstep.
+  - `createAnimatorSet` (FolderAnimationSpringBuilderManager) runBefore →
+    if `PreviewItemManager.mCurrentPageParams` is empty, copy
+    `mFirstPageParams` into it (see Bug 4).
+- Caches: `lastCurNumItemsByRule` / `lastTotalContentsByRule`
+  (WeakHashMaps keyed by the rule object) let the animation hooks know the
+  real preview/total counts.
+
+### Import/Export (ImportExportMod.kt)
+
+- **Export**: stock launcher's own button — works, untouched. Produces XML:
+  `<workspace rows columns>` with `<autoinstall>` (apps; hotseat items use
+  `rank` instead of x/y/screen), nested `<folder titleText>` elements, and
+  `<appwidget ... className packageName>` for widgets. Real sample preserved
+  at `attic/launcher_grid_export.xml`.
+- **Import** (stock is a dead stub — zero writes after picking a file):
+  1. GATE: hook `android.app.Instrumentation.execStartActivity` — any
+     `ACTION_OPEN_DOCUMENT` start in the launcher process raises a one-shot
+     `importPending` flag.
+  2. CATCH: hook BOTH `Activity.onActivityResult` and androidx
+     `ActivityResultRegistry.dispatchResult` — whichever fires first
+     consumes the flag and takes the URI (covers classic and
+     ActivityResultLauncher delivery; the stock callback is a stub).
+  3. PARSE: `XmlPullParser` directly — deliberately NOT Google's
+     `AutoInstallsLayout` (coupled to APK-resource lookup; dies with
+     `XmlPullParserException: Missing attribute screen`). Whole file parsed
+     before any DB write.
+  4. WRITE: **direct SQLiteDatabase** — largest `launcher*.db` in
+     `applicationInfo.dataDir/databases` (name varies by grid). One
+     transaction: `DELETE FROM favorites` (wipe & replace) → insert rows
+     (folder `_id` remapping, hotseat slot in `screen`+`cellX`, rank for
+     folder children) → commit → close. Intent strings rebuilt as
+     `#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;launchFlags=0x10200000;component=pkg/cls;end`
+     with `$` → `%24`.
+  5. WIDGETS: allocate a real AppWidgetId via `AppWidgetHost(context,
+     hostId)` (host id read from `com.android.launcher3.LauncherAppWidgetHost.APPWIDGET_HOST_ID`,
+     fallback 1024), bind with
+     `AppWidgetManager.bindAppWidgetIdIfAllowed(appWidgetId, provider)` —
+     NOTE the argument order (id first) — then write the row with
+     `appWidgetId` + `appWidgetProvider` (`ComponentName.flattenToString()`).
+     Works because we run inside the launcher process, which holds
+     `BIND_APPWIDGET`. Uninstalled providers → skipped + counted.
+  6. Toast result → root-proxy `killall` so `LoaderTask` re-reads fresh.
+
+## 4. Bug history (root causes → fixes)
+
+| # | Symptom | Root cause | Fix |
+|---|---------|-----------|-----|
+| 1 | Folder preview broken >4 icons | AOSP hardcodes max 4 preview icons; its own math (0.44x scale, corner stacking) can't do more | Custom grid math in `repositionPreviewItemAsGrid` |
+| 2 | Icon sizes/spacing wrong at 7+ | Arbitrary factors (0.82/0.9) not anchored to anything | Derived 0.88/1.0 from stock's 0.44x preview scale (decompiled `PreviewItemManager` + `ClippedFolderIconLayoutRule.scaleForItem`) |
+| 3 | Open/close "flash" (layout changes mid-morph) | Preview used uncapped `ceil(sqrt(n))` cols while the open folder's `mCountX` was capped at 4 | Cap both sides identically (`gridPitch` + `setContentSize` hook) |
+| 4 | "Only 4 icons animate, rest pop in ~1s later" | `PreviewItemManager.mCurrentPageParams` is EMPTY at animation-build time (v23 capture: `mFirstPageParams.size=9`, `mCurrentPageParams.size=0`); the spring builder reads it raw with no fallback | `createAnimatorSet` runBefore hook copies `mFirstPageParams` → `mCurrentPageParams` (a copy, not an alias) |
+| 5 | Close animation: wrong order/count for ~0.5s, then corrects | `createAnimatorSet` walks page icons as `getGridPosition(i/mCountX, i%mCountX)` with `mCountX` sized from TOTAL contents (11 → 4 cols) while reconstruction used the PREVIEW count (9 → 3 cols) → duplicated indices (0,1,2,3,3,4,5,6,6,7,8) | `getGridPosition` hook rebuilds the caller's column count from the cached total (`lastTotalContentsByRule`), replicating the exact `setContentSize` formula |
+| 6 | "Sliver of something outside the folder" during close | Page icons beyond the preview cap kept AOSP's raw extrapolated coords (~2x outside `availableSpace`) — 54 such events in the v49 log | Clamp out-of-range indices onto the last preview slot |
+| 7 | Honeycomb preview clustered upper-left >7 items (original Bug 1) | Slot selection took the sorted-first-N of ALL ring slots; ring-2's top cells dominated the (y,x) sort so the center/bottom never filled | (Moot — rings removed. Historical fix: ring-first selection, then sort chosen slots only.) |
+| 8 | Stock Import button does nothing | `onActivityResult`/ActivityResultLauncher callback is a stub; picked URI goes nowhere (proven by before/after file-timestamp snapshot: zero writes) | ImportExportMod (above) |
+| 9 | Toast "Restarting launcherâ€¦" garbage | UTF-8 ellipsis double-encoded in `strings.xml` (also `search_hint`) | ASCII `...` |
+
+## 5. Things tried and REVERTED (learned the hard way)
+
+- **Close-animation alpha-fade suppression** (early round): suppressing
+  AOSP's close-direction `VIEW_ALPHA` fade did nothing for the real bug and
+  changed stock behavior → **reverted**; destinations were the real problem
+  (Bug 5). The stagger-delay zeroing from round 2 stayed.
+- **Honeycomb as concentric hex rings** (v2–v50, renamed "flower" in v51):
+  worked at 7 (center + 6) but 8+ needed a second ring that shrank icons
+  hard ("at 9 it's like it's scaling the size for way more apps") → split
+  to its own option (v51), then **merged back and deleted** (v53/v55).
+- **Honeycomb as staggered rows** (v51): equal-width rows with only the
+  middle row nudged — William: "thats not honeycomb thats more like a
+  cheveron" → replaced in v52.
+- **Tapered hexagon pile** (v52): correct-looking but "not what I'd like" —
+  William wanted the flower@7 look at 9 → v53 merged flower + honeycomb
+  into a center + single adaptive ring (radius = gridPitch/(2·sin(π/m)),
+  full-size icons, 4-item folders included).
+- **ALL shapes** (circle/list/honeycomb/flower) + **TEMP settings page**
+  (master toggle, size/spacing/gap sliders, shape dropdown): removed in
+  v55 — William: "the grid shape will be implemented into the app as the
+  default and only shape. i don't like them." Values baked in as constants.
+  The v54 circle slot-matching (ring slots assigned by open-folder angular
+  position to shorten animation travel) died with circle.
+- **LauncherProvider-based import writes**: provider throws
+  `"same process should call model directly"` for in-process callers —
+  provider path is external-callers-only on this build → direct SQLite.
+- **`PRAGMA busy_timeout` via `execSQL`**: throws
+  `"Queries can be performed using SQLiteDatabase query or rawQuery methods
+  only"` (PRAGMAs return a row) → removed; Android applies its own default
+  busy timeout.
+- **`LauncherSettings$Favorites.CONTENT_URI` reflection**: comes up empty on
+  this build (and the authority is NOT the AOSP default — it's
+  `<packageName>.settings`, confirmed via `pm dump`) → authority now
+  discovered from the package manifest (kept as documentation; the current
+  code writes via direct SQLite and doesn't need the provider at all).
+- **Diagnostic logging** (FlashDebug/HoneycombDebug/FolderSizeDebug/
+  LauncherModelDump, class dumps): all stripped in v55 final.
+- **v55 cleanup mishap** (kept for honesty): while stripping
+  `LauncherModelDump` from LauncherUtils the dump block was accidentally
+  duplicated, then removed; also a bogus `toolkit.enqueueProxyCommand`
+  import was briefly added. Build caught nothing (it was valid syntax) —
+  caught in review before commit.
+
+## 6. Known limitations
+
+- **Widget configs reset** on import (per-widget settings live in the
+  widget's own app, keyed to the old widget id — cannot survive XML).
+- **Widget size options** are not pushed at bind time (no
+  `OPTION_APPWIDGET_*` bundle) — most widgets sort themselves out on first
+  layout; a wrong-sized one fixes via long-press resize. Can be added from
+  DeviceProfile cell dims if William ever wants it.
+- **Residual minor close-flash** is still theoretically possible: the
+  animation's per-cell pitch inside `getGridPosition` is AOSP's own formula,
+  not ours (we only override destinations for icons the builder walks).
+  Never observed as a problem after Bug 5's fix.
+- **Drag-reorder animations + accessibility** still reference AOSP's
+  hardcoded 4-icon preview (pre-existing upstream gap, left as-is).
+- Import is **wipe & replace** by design (William's choice).
+
+## 7. Conventions (see AGENTS.md for the full rules)
+
+- Code comments narrating decisions use `William, Aug 2026` + round/version.
+- Historical "why" comments are deliberately verbose — they encode
+  on-device evidence so nobody re-litigates solved bugs.
+- Commit style: `vNN: description` on branch `layout-tweaks`.
+- Evidence first: never guess a reflection class/method/field — verify via
+  decompile, runtime dump, or logcat capture first.
