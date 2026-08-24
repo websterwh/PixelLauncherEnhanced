@@ -15,7 +15,7 @@
     <string name="btn_pick_image">Pick image</string>
     <string name="understood">Understood</string>
     <string name="settings_title">Settings</string>
-    <string name="search_hint">Searchâ€¦</string>
+    <string name="search_hint">Search...</string>
 
     <string name="root_connection_failed_title">Root connection failed</string>
     <string name="root_connection_failed_desc">Unable to connect to root service. Please grant root access and try again.</string>
@@ -92,7 +92,7 @@
     <string name="recents_background_opacity_title">Recents background opacity</string>
     <string name="restart_launcher_title">Restart</string>
     <string name="restart_launcher_desc">Restart the launcher manually to apply any pending settings</string>
-    <string name="restarting_launcher">Restarting launcherâ€¦</string>
+    <string name="restarting_launcher">Restarting launcher...</string>
     <string name="developer_options_title">Developer options</string>
     <string name="developer_options_desc">Enable hidden developer options</string>
     <string name="entry_in_launcher_settings">Show entry in launcher settings</string>
