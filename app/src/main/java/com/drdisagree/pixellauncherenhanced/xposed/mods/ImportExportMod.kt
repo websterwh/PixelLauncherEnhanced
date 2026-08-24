@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ProviderInfo
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -166,7 +168,7 @@ class ImportExportMod(context: Context) : ModPack(context) {
 
     private fun importLayout(uri: Uri): ImportCounts {
         val favoritesUri = getFavoritesUri()
-            ?: throw IllegalStateException("LauncherSettings.Favorites.CONTENT_URI not found")
+            ?: throw IllegalStateException("favorites provider not found")
 
         // Parse EVERYTHING before touching the database, so a malformed file
         // can never leave the workspace half-wiped.
@@ -257,9 +259,36 @@ class ImportExportMod(context: Context) : ModPack(context) {
             "launchFlags=0x10200000;" +
             "component=$packageName/${className.replace("$", "%24")};end"
 
-    private fun getFavoritesUri(): Uri? =
-        findClass("com.android.launcher3.LauncherSettings\$Favorites")
-            ?.getStaticFieldSilently("CONTENT_URI") as? Uri
+    private fun getFavoritesUri(): Uri? {
+        // Preferred: the launcher's own constant.
+        (findClass("com.android.launcher3.LauncherSettings\$Favorites")
+            ?.getStaticFieldSilently("CONTENT_URI") as? Uri)?.let { return it }
+
+        // Fallback (confirmed on-device, Aug 2026): the LauncherProvider's
+        // authority as declared in the manifest. On William's build it is
+        // "<packageName>.settings", NOT the AOSP default
+        // ("com.android.launcher3.settings") - and the
+        // LauncherSettings$Favorites constant lookup above comes up empty
+        // on this build. Read the authority from the package manager
+        // instead of hardcoding either form.
+        val providers = try {
+            mContext.packageManager.getPackageInfo(
+                mContext.packageName,
+                PackageManager.GET_PROVIDERS
+            ).providers
+        } catch (_: Exception) {
+            null
+        } ?: return null
+
+        val provider = providers.firstOrNull {
+            it.name == "com.android.launcher3.LauncherProvider"
+        } ?: providers.firstOrNull {
+            it.authority?.split(";")?.any { authority -> authority.endsWith(".settings") } == true
+        } ?: return null
+
+        val authority = provider.authority?.split(";")?.firstOrNull() ?: return null
+        return Uri.parse("content://$authority/favorites")
+    }
 
     private fun openStream(uri: Uri): InputStream =
         mContext.contentResolver.openInputStream(uri)
