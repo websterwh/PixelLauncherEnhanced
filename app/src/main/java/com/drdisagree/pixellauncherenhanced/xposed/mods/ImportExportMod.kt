@@ -192,9 +192,11 @@ class ImportExportMod(context: Context) : ModPack(context) {
             SQLiteDatabase.OPEN_READWRITE
         )
         try {
-            // Wait up to 5s for the launcher's own connection if it holds
-            // the write lock mid-transaction, instead of failing fast.
-            db.execSQL("PRAGMA busy_timeout=5000")
+            // NOTE: no "PRAGMA busy_timeout" here - executing it via
+            // execSQL throws "Queries can be performed using SQLiteDatabase
+            // query or rawQuery methods only" (PRAGMAs return a result row,
+            // confirmed on-device Aug 2026). Android already applies its own
+            // default busy timeout to every SQLiteDatabase connection.
 
             db.beginTransaction()
             try {
