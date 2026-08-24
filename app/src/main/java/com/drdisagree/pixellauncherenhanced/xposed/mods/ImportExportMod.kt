@@ -4,8 +4,7 @@ import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.content.pm.ProviderInfo
+import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -14,10 +13,10 @@ import android.widget.Toast
 import com.drdisagree.pixellauncherenhanced.xposed.HookEntry.Companion.enqueueProxyCommand
 import com.drdisagree.pixellauncherenhanced.xposed.ModPack
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.XposedHook.Companion.findClass
-import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getStaticFieldSilently
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.hookMethod
 import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam
 import org.xmlpull.v1.XmlPullParser
+import java.io.File
 import java.io.InputStream
 
 /**
@@ -43,11 +42,13 @@ import java.io.InputStream
  *    XmlPullParser - deliberately NOT routed through Google's
  *    AutoInstallsLayout, which is coupled to its resource-lookup path and
  *    dies on "Missing attribute screen" (per the notes).
- * 4. WRITE - rows go into the favorites table through the launcher's OWN
- *    LauncherProvider (contentResolver.insert against
- *    LauncherSettings.Favorites.CONTENT_URI), so the provider picks the
- *    correct database file itself and hands back generated _ids for folder
- *    children to reference. Semantics: WIPE & REPLACE (a restore, matching
+ * 4. WRITE - rows go straight into the favorites SQLite database with our
+ *    own SQLiteDatabase connection (largest launcher*.db in the launcher's
+ *    databases directory - the name varies by grid, William's device uses
+ *    launcher_4_by_6.db). The LauncherProvider route is NOT usable: on this
+ *    build it throws "same process should call model directly" for any
+ *    in-process call (confirmed on-device, Aug 2026) - it only serves
+ *    external callers. Semantics: WIPE & REPLACE (a restore, matching
  *    William's manual db-swap workflow). Widgets are skipped (their bindings
  *    are device-specific and cannot survive an XML round-trip).
  * 5. RESTART - toast + root killall via the existing proxy so LoaderTask
@@ -167,9 +168,6 @@ class ImportExportMod(context: Context) : ModPack(context) {
     private class ImportCounts(val apps: Int, val folders: Int, val widgetsSkipped: Int)
 
     private fun importLayout(uri: Uri): ImportCounts {
-        val favoritesUri = getFavoritesUri()
-            ?: throw IllegalStateException("favorites provider not found")
-
         // Parse EVERYTHING before touching the database, so a malformed file
         // can never leave the workspace half-wiped.
         val topItems = parseLayout(openStream(uri))
@@ -178,30 +176,69 @@ class ImportExportMod(context: Context) : ModPack(context) {
         var apps = 0
         var folders = 0
 
-        // Wipe & replace: this is a restore, not a merge.
-        mContext.contentResolver.delete(favoritesUri, null, null)
+        // Write DIRECTLY to the favorites SQLite database. The
+        // LauncherProvider route is dead by design: on this build the
+        // provider throws "same process should call model directly" for any
+        // call made from inside the launcher process (confirmed on-device,
+        // Aug 2026) - it only serves external callers. Opening the same
+        // database file with our own connection is exactly what the proven
+        // standalone-script approach did (see
+        // plenhanced_import_export_notes.md); SQLite serializes concurrent
+        // connections, and the post-import process restart makes the
+        // launcher's in-memory model irrelevant anyway.
+        val db = SQLiteDatabase.openDatabase(
+            findFavoritesDbFile().absolutePath,
+            null,
+            SQLiteDatabase.OPEN_READWRITE
+        )
+        try {
+            // Wait up to 5s for the launcher's own connection if it holds
+            // the write lock mid-transaction, instead of failing fast.
+            db.execSQL("PRAGMA busy_timeout=5000")
 
-        for (item in topItems) {
-            if (item.isWidget) continue
-            insertItem(favoritesUri, item, rank = 0)
-            if (item.itemType == ITEM_TYPE_FOLDER) folders++ else apps++
+            db.beginTransaction()
+            try {
+                // Wipe & replace: this is a restore, not a merge.
+                db.delete("favorites", null, null)
+
+                for (item in topItems) {
+                    if (item.isWidget) continue
+                    insertItemTree(db, item, rank = 0)
+                    if (item.itemType == ITEM_TYPE_FOLDER) folders++ else apps++
+                }
+
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
+        } finally {
+            db.close()
         }
 
         return ImportCounts(apps, folders, widgetsSkipped)
     }
 
-    private fun insertItem(favoritesUri: Uri, item: ParsedItem, rank: Int) {
-        val values = buildValues(item, rank)
-        val insertedUri = mContext.contentResolver.insert(favoritesUri, values)
-            ?: throw IllegalStateException("LauncherProvider refused an insert")
-        val generatedId = insertedUri.lastPathSegment?.toLongOrNull()
+    // The favorites database name varies by launcher grid (William's device
+    // uses "launcher_4_by_6.db"), so discover it: the largest launcher*.db
+    // in the launcher's own databases directory. -wal/-shm/-journal
+    // sidecars don't match the ".db" suffix filter.
+    private fun findFavoritesDbFile(): File {
+        val databasesDir = File(mContext.applicationInfo.dataDir, "databases")
+        val candidates = databasesDir.listFiles { file ->
+            file.isFile && file.name.startsWith("launcher") && file.name.endsWith(".db")
+        } ?: throw IllegalStateException("databases directory not found")
+        return candidates.maxByOrNull { it.length() }
+            ?: throw IllegalStateException("no launcher database file found")
+    }
+
+    private fun insertItemTree(db: SQLiteDatabase, item: ParsedItem, rank: Int) {
+        val generatedId = db.insert("favorites", null, buildValues(item, rank))
+        if (generatedId < 0) throw IllegalStateException("favorites insert failed")
 
         val children = item.children ?: return
-        for ((index, child) in children.withIndex()) {
+        var nextRank = 0
+        for (child in children) {
             if (child.isWidget) continue
-            if (generatedId == null) {
-                throw IllegalStateException("Insert returned no row id for a folder")
-            }
             val childWithContainer = ParsedItem(
                 itemType = child.itemType,
                 container = generatedId.toInt(),
@@ -213,10 +250,10 @@ class ImportExportMod(context: Context) : ModPack(context) {
                 title = child.title,
                 packageName = child.packageName,
                 className = child.className,
-                isWidget = child.isWidget,
+                isWidget = false,
                 children = null
             )
-            insertItem(favoritesUri, childWithContainer, rank = index)
+            insertItemTree(db, childWithContainer, rank = nextRank++)
         }
     }
 
@@ -258,37 +295,6 @@ class ImportExportMod(context: Context) : ModPack(context) {
             "category=android.intent.category.LAUNCHER;" +
             "launchFlags=0x10200000;" +
             "component=$packageName/${className.replace("$", "%24")};end"
-
-    private fun getFavoritesUri(): Uri? {
-        // Preferred: the launcher's own constant.
-        (findClass("com.android.launcher3.LauncherSettings\$Favorites")
-            ?.getStaticFieldSilently("CONTENT_URI") as? Uri)?.let { return it }
-
-        // Fallback (confirmed on-device, Aug 2026): the LauncherProvider's
-        // authority as declared in the manifest. On William's build it is
-        // "<packageName>.settings", NOT the AOSP default
-        // ("com.android.launcher3.settings") - and the
-        // LauncherSettings$Favorites constant lookup above comes up empty
-        // on this build. Read the authority from the package manager
-        // instead of hardcoding either form.
-        val providers = try {
-            mContext.packageManager.getPackageInfo(
-                mContext.packageName,
-                PackageManager.GET_PROVIDERS
-            ).providers
-        } catch (_: Exception) {
-            null
-        } ?: return null
-
-        val provider = providers.firstOrNull {
-            it.name == "com.android.launcher3.LauncherProvider"
-        } ?: providers.firstOrNull {
-            it.authority?.split(";")?.any { authority -> authority.endsWith(".settings") } == true
-        } ?: return null
-
-        val authority = provider.authority?.split(";")?.firstOrNull() ?: return null
-        return Uri.parse("content://$authority/favorites")
-    }
 
     private fun openStream(uri: Uri): InputStream =
         mContext.contentResolver.openInputStream(uri)
