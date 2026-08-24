@@ -65,30 +65,6 @@ object Constants {
     const val DOCK_BOTTOM_SPACING = "xposed_dockbottomspacing"
     const val FOLDER_PREVIEW_ICON_COUNT = "xposed_folderpreviewiconcount"
 
-    // TEMPORARY (William, Aug 2026): lets him dial in the 7+-item folder
-    // preview icon size and spacing live on-device instead of guessing blind.
-    // Now live on their own "TEMP" main-menu tab (res/xml/temp_mods.xml,
-    // ui/fragments/TempMods.kt) instead of Home screen settings, gated by
-    // TEMP_MASTER_ENABLE below. Remove both constants, TEMP_MASTER_ENABLE,
-    // their GridOptions.kt usage, the TempMods fragment/screen, and the
-    // launcherTemp entry in home_page.xml once he's picked values - at that
-    // point bake the chosen numbers in as GridOptions.kt's constant defaults
-    // and delete these prefs entirely.
-    const val FOLDER_PREVIEW_ICON_SIZE_TEMP = "xposed_folderpreviewiconsize_temp"
-    const val FOLDER_PREVIEW_ICON_SPACING_TEMP = "xposed_folderpreviewiconspacing_temp"
-
-    // Third TEMP slider - flat dp gap added between preview icons,
-    // independent of the size/spacing sliders above.
-    const val FOLDER_PREVIEW_ICON_GAP_TEMP = "xposed_folderpreviewicongap_temp"
-
-    // Dropdown: which arrangement (grid/circle/list) to lay out a >4-item
-    // folder preview in.
-    const val FOLDER_PREVIEW_SHAPE_TEMP = "xposed_folderpreviewshape_temp"
-
-    // Master on/off toggle for the whole TEMP tab - flipping it off disables
-    // every temp adjustment at once (GridOptions.kt falls back to AOSP's own
-    // un-adjusted preview layout) without losing the dialed-in slider values.
-    const val TEMP_MASTER_ENABLE = "xposed_temp_master_enable"
     const val APP_DRAWER_GRID_COLUMNS = "xposed_appdrawergridcolumns"
     const val APP_DRAWER_GRID_ROW_HEIGHT_MULTIPLIER = "xposed_appdrawergridrowheightmultiplier"
     const val APP_BLOCK_LIST = "xposed_appblocklist"

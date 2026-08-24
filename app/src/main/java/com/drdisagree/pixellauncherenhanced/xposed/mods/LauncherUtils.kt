@@ -12,13 +12,11 @@ import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.XposedHook.Compa
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.callMethod
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.callMethodSilently
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.callStaticMethod
-import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.dumpClass
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getAnyField
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getField
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.hasMethod
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.hookConstructor
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.hookMethod
-import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.log
 import com.drdisagree.pixellauncherenhanced.xposed.utils.BootLoopProtector.resetCounter
 import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam
 import kotlinx.coroutines.CoroutineScope
@@ -96,15 +94,6 @@ class LauncherUtils(context: Context) : ModPack(context) {
         private var mIconDb: Any? = null
         private var mCache: Any? = null
         private var mModel: Any? = null
-
-        // TEMPORARY (William, Aug 2026): diagnostic-only, fires once. See the
-        // comment on mModel.callMethodSilently("forceReload") in reloadIcons()
-        // below - forceReload() doesn't exist on this build's LauncherModel.
-        // This dumps the real class once so the actual replacement method
-        // name can be found instead of guessed. Search logcat for
-        // "LauncherModelDump". Remove this var, the dumpClass() call, and
-        // the mModelDumped guard once a real replacement is hooked up.
-        private var mModelDumped = false
 
         fun getAttrColor(context: Context, resID: Int): Int {
             return runCatching {
@@ -201,12 +190,6 @@ class LauncherUtils(context: Context) : ModPack(context) {
                             mOpenHelper.callMethod("getWritableDatabase")
                         )
                     }
-                }
-
-                if (!mModelDumped) {
-                    mModelDumped = true
-                    log("LauncherModelDump", "mModel.javaClass=${mModel?.javaClass?.name}")
-                    mModel?.javaClass.dumpClass()
                 }
 
                 // Was mModel.callMethod("forceReload") - that throws

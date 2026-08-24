@@ -48,12 +48,6 @@
     <string name="fragment_miscellaneous_desc">Other useful options</string>
     <string name="fragment_about_title">About</string>
     <string name="fragment_about_desc">About this application</string>
-    <!-- TEMPORARY (William, Aug 2026): whole entry. See TEMP_MASTER_ENABLE in
-         Constants.kt for removal instructions. -->
-    <string name="fragment_temp_title">[TEMP] Experimental</string>
-    <string name="fragment_temp_desc">Work-in-progress options, will be removed or made permanent later</string>
-    <string name="temp_master_enable_title">Enable TEMP adjustments</string>
-    <string name="temp_master_enable_desc">Turn off to disable every option on this screen at once, without losing the values below</string>
     <string name="uninstall_in_context_menu_title">Uninstall in context menu</string>
     <string name="uninstall_in_context_menu_desc">Add a real Uninstall entry to the long-press menu on home screen and app drawer icons (only shows for apps that can actually be uninstalled). Requires a launcher restart.</string>
     <string name="backup_restore_settings_title">Backup / restore settings</string>
@@ -135,14 +129,6 @@
     <string name="desktop_icon_horizontal_margin_title">Icon horizontal margin</string>
     <string name="dock_bottom_spacing_title">Dock distance from bottom</string>
     <string name="folder_preview_icon_count_title">Folder preview icon count</string>
-    <string name="folder_preview_icon_size_temp_title">[TEMP] Folder preview icon size</string>
-    <string name="folder_preview_icon_size_temp_desc">Testing only - controls how big the folder preview icons are when 7 or more are shown. Will be removed or made permanent later.</string>
-    <string name="folder_preview_icon_spacing_temp_title">[TEMP] Folder preview icon spacing</string>
-    <string name="folder_preview_icon_spacing_temp_desc">Testing only - controls how close together the folder preview icons are packed when 7 or more are shown. Will be removed or made permanent later.</string>
-    <string name="folder_preview_icon_gap_temp_title">[TEMP] Folder preview icon gap</string>
-    <string name="folder_preview_icon_gap_temp_desc">Testing only - adds a flat gap between folder preview icons, independent of the size and spacing sliders above. Will be removed or made permanent later.</string>
-    <string name="folder_preview_shape_temp_title">[TEMP] Folder preview shape</string>
-    <string name="folder_preview_shape_temp_desc">Testing only - which arrangement to use for folder previews with 5 or more icons. Will be removed or made permanent later.</string>
     <string name="app_drawer_columns_title">App drawer columns</string>
     <string name="app_drawer_row_height_multiplier_title">Row height multiplier</string>
     <string name="hide_apps_title">Hide apps from app drawer</string>

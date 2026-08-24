@@ -9,36 +9,24 @@ import com.drdisagree.pixellauncherenhanced.data.common.Constants.DESKTOP_GRID_C
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.DESKTOP_GRID_ROWS
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.FOLDER_GRID_4X4_ENABLE
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.FOLDER_PREVIEW_ICON_COUNT
-import com.drdisagree.pixellauncherenhanced.data.common.Constants.FOLDER_PREVIEW_ICON_GAP_TEMP
-import com.drdisagree.pixellauncherenhanced.data.common.Constants.FOLDER_PREVIEW_ICON_SIZE_TEMP
-import com.drdisagree.pixellauncherenhanced.data.common.Constants.FOLDER_PREVIEW_ICON_SPACING_TEMP
-import com.drdisagree.pixellauncherenhanced.data.common.Constants.FOLDER_PREVIEW_SHAPE_TEMP
-import com.drdisagree.pixellauncherenhanced.data.common.Constants.TEMP_MASTER_ENABLE
 import com.drdisagree.pixellauncherenhanced.xposed.ModPack
 import com.drdisagree.pixellauncherenhanced.xposed.mods.LauncherUtils.Companion.reloadLauncher
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.Helpers.toPx
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.XposedHook.Companion.findClass
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.callMethodSilently
-import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.dumpClass
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getField
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getFieldSilently
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getStaticFieldSilently
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.hookConstructor
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.hookMethod
-import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.log
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.setField
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.setFieldSilently
 import com.drdisagree.pixellauncherenhanced.xposed.utils.XPrefs.Xprefs
 import de.robv.android.xposed.callbacks.XC_LoadPackage
-import kotlin.math.PI
-import kotlin.math.atan2
 import kotlin.math.ceil
-import kotlin.math.cos
-import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.math.sin
 import kotlin.math.sqrt
 
 class GridOptions (context: Context) : ModPack(context) {
@@ -59,64 +47,6 @@ class GridOptions (context: Context) : ModPack(context) {
 
     private var folderPreviewIconCount = 0
 
-    // TEMPORARY (William, Aug 2026): see FOLDER_PREVIEW_ICON_SIZE_TEMP /
-    // FOLDER_PREVIEW_ICON_SPACING_TEMP in Constants.kt for removal
-    // instructions. Both stored as percents so they're clean integer
-    // sliders; divided down to 0.xx fractions here. Only applied to folders
-    // with >= SCALE_SLIDER_MIN_ITEMS (7) preview items - see
-    // scaleFactorFor()/sizeFactorFor() in handleLoadPackage().
-    //
-    // folderPreviewIconSpacingScale controls the grid pitch (how close
-    // together the icons/cells sit - lower pulls the whole cluster toward
-    // the center). folderPreviewIconSizeScale controls how much of each
-    // cell's pitch the icon itself fills (independent of spacing, so the
-    // icon can be made bigger/smaller without changing how tightly packed
-    // the cluster is).
-    // William, Aug 2026: defaults anchored to the real stock 4-icon preview
-    // scale, derived from decompiled source rather than picked by feel.
-    // PreviewItemManager.computePreviewDrawingParams() sets
-    // mBaselineIconScale = previewSize / iconSize (previewSize is exactly
-    // our "availableSpace"), and ClippedFolderIconLayoutRule.scaleForItem()
-    // returns 0.44 * mBaselineIconScale for a 4-icon preview - so stock
-    // always draws each of its 4 preview icons at exactly
-    // 0.44 * availableSpace px, independent of icon size. Our own icon size
-    // (iconFootprint) works out to
-    // (availableSpace / max(cols, rows)) * spacingFactor * sizeFactor - so
-    // treating stock's 4-icon case as an (effective) 2x2 grid
-    // (max(cols,rows)=2) and solving for the product that reproduces
-    // stock's 0.44 * availableSpace gives spacingFactor * sizeFactor =
-    // 0.44 * 2 = 0.88. Split as sizeFactor=1.0 (icon fully fills its cell,
-    // no extra shrink) and spacingFactor=0.88 (does the rest of the work),
-    // matching how the sliders already read to William: "icon size" as a
-    // fill-fraction knob, "spacing" as the cluster-tightness knob. William's
-    // own hand-tuned values (100%/85%) landed within ~3% of this derived
-    // 88% - close enough that this is really just a mathematical
-    // confirmation of what he already found by eye.
-    private var folderPreviewIconSpacingScale = 0.88f
-    private var folderPreviewIconSizeScale = 1.0f
-
-    // TEMPORARY (William, Aug 2026): third TEMP slider - an absolute dp gap
-    // added purely to the DISTANCE between preview icons, independent of the
-    // size (%) and spacing (%) sliders above, which both also indirectly
-    // affect icon draw size. See gapPx usage in repositionPreviewItemAsGrid.
-    // Default 2dp matches William's tuned value - purely a taste/spread
-    // choice, not part of the stock-matching math above (which implies 0).
-    private var folderPreviewIconGapTemp = 2
-
-    // TEMPORARY (William, Aug 2026): which arrangement to use for >4-item
-    // folder previews. "grid" is the original square-grid behavior; the
-    // others are alternate shapes so William can compare them. See
-    // positionForShape() in handleLoadPackage().
-    private var folderPreviewShapeTemp = "grid"
-
-    // TEMP tab master toggle (William, Aug 2026): when off, the whole custom
-    // preview-repositioning system is skipped entirely (not just reset to
-    // default slider values) so the folder falls back to AOSP's own,
-    // un-adjusted preview layout - lets William A/B compare his adjustments
-    // against stock instead of just seeing the sliders' "default" numbers,
-    // which still went through our custom grid/shape math.
-    private var tempModsEnabled = true
-
     override fun updatePrefs(vararg key: String) {
         Xprefs.apply {
             homeScreenGridRows = getSliderInt(DESKTOP_GRID_ROWS, 0)
@@ -130,11 +60,6 @@ class GridOptions (context: Context) : ModPack(context) {
             folderGridRows = if (folderGrid4x4Enabled) 4 else 0
             folderGridColumns = if (folderGrid4x4Enabled) 4 else 0
             folderPreviewIconCount = getSliderInt(FOLDER_PREVIEW_ICON_COUNT, 0)
-            tempModsEnabled = getBoolean(TEMP_MASTER_ENABLE, true)
-            folderPreviewIconSpacingScale = getSliderInt(FOLDER_PREVIEW_ICON_SPACING_TEMP, 88) / 100f
-            folderPreviewIconSizeScale = getSliderInt(FOLDER_PREVIEW_ICON_SIZE_TEMP, 100) / 100f
-            folderPreviewIconGapTemp = getSliderInt(FOLDER_PREVIEW_ICON_GAP_TEMP, 2)
-            folderPreviewShapeTemp = getListString(FOLDER_PREVIEW_SHAPE_TEMP, "grid") ?: "grid"
             appDrawerGridColumns = getSliderInt(APP_DRAWER_GRID_COLUMNS, 0)
             appDrawerGridRowHeightMultiplier =
                 getSliderFloat(APP_DRAWER_GRID_ROW_HEIGHT_MULTIPLIER, 10f) / 10f
@@ -146,11 +71,6 @@ class GridOptions (context: Context) : ModPack(context) {
             DESKTOP_DOCK_COLUMNS,
             FOLDER_GRID_4X4_ENABLE,
             FOLDER_PREVIEW_ICON_COUNT,
-            FOLDER_PREVIEW_ICON_SPACING_TEMP,
-            FOLDER_PREVIEW_ICON_SIZE_TEMP,
-            FOLDER_PREVIEW_ICON_GAP_TEMP,
-            FOLDER_PREVIEW_SHAPE_TEMP,
-            TEMP_MASTER_ENABLE,
             APP_DRAWER_GRID_COLUMNS,
             APP_DRAWER_GRID_ROW_HEIGHT_MULTIPLIER -> reloadLauncher(mContext)
         }
@@ -347,70 +267,6 @@ class GridOptions (context: Context) : ModPack(context) {
         val previewItemManagerClass =
             findClass("com.android.launcher3.folder.PreviewItemManager")
 
-        // TEMPORARY (William, Aug 2026): diagnostic-only. v31's setContentSize
-        // fix writes the right mCountX/mCountY (confirmed via FolderSizeDebug
-        // logs - e.g. 4x4 for an 18-item folder), but William reports the
-        // actual folder view still splits at 9 items per page no matter what
-        // mCountX/mCountY end up as - meaning something ELSE decides the
-        // items-per-page split, earlier than or separately from
-        // setContentSize, and mCountX/mCountY only affect how many empty
-        // grid slots get drawn on a page that's already been given its items.
-        // Dumping FolderGridOrganizer's full declared surface (paced, same
-        // flooding problem as the UninstallDebug dump) to find whatever
-        // computes/caps the per-page item count. Remove this block once the
-        // real pagination method is found and hooked.
-        folderGridOrganizerClass?.let { clazz ->
-            Thread {
-                Thread.sleep(4500) // after the UninstallDebug dump's pacing window
-                log("FolderSizeDebug", "Dumping FolderGridOrganizer (paced)...")
-                log("FolderSizeDebug", "  extends: ${clazz.superclass?.name}")
-
-                val ctors = clazz.declaredConstructors
-                log("FolderSizeDebug", "  Constructors (${ctors.size}):")
-                for (c in ctors) {
-                    log("FolderSizeDebug", "    (${c.parameterTypes.joinToString { it.typeName }})")
-                    Thread.sleep(15)
-                }
-
-                val declaredMethods = clazz.declaredMethods
-                log("FolderSizeDebug", "  Declared methods (${declaredMethods.size}):")
-                for (m in declaredMethods) {
-                    log(
-                        "FolderSizeDebug",
-                        "    ${m.name}(${m.parameterTypes.joinToString { it.typeName }}): ${m.returnType.typeName}"
-                    )
-                    Thread.sleep(15)
-                }
-
-                val fields = clazz.declaredFields
-                log("FolderSizeDebug", "  Declared fields (${fields.size}):")
-                for (f in fields) {
-                    log("FolderSizeDebug", "    ${f.name}: ${f.type.typeName}")
-                    Thread.sleep(15)
-                }
-
-                log("FolderSizeDebug", "Done dumping FolderGridOrganizer.")
-            }.start()
-        }
-
-        // TEMPORARY (William, Aug 2026): diagnostic-only. The PreviewItemManager
-        // dump (confirmed via logcat, Aug 2026) found a zero-arg
-        // recomputePreviewDrawingParams() method plus a mIcon: FolderIcon
-        // field - i.e. this class can force-refresh the closed folder
-        // icon's preview, which fits the working theory that the close
-        // animation is morphing from a stale/default layout because
-        // nothing re-computed it before the animation grabbed its start
-        // state (see the fuller theory where scaleForItem is hooked,
-        // below). Before wiring that in as a real fix, this logs whether
-        // AOSP itself ever calls recomputePreviewDrawingParams() around an
-        // open/close cycle - if it never fires, that confirms the preview
-        // genuinely goes stale and calling it ourselves before close is the
-        // right move; if it already fires and the flash still happens, the
-        // bug is elsewhere. Remove this hook once diagnosed.
-        previewItemManagerClass
-            .hookMethod("recomputePreviewDrawingParams")
-            .runBefore { log("FlashDebug", "PreviewItemManager.recomputePreviewDrawingParams() called") }
-
         // Folder grid rows/columns (the OPEN folder's own grid, distinct from
         // the closed preview handled below). AOSP's FolderGridOrganizer only
         // uses numFolderRows/numFolderColumns as a CAP - calculateGridSize()
@@ -491,12 +347,6 @@ class GridOptions (context: Context) : ModPack(context) {
                 if (newMaxCols != null && newMaxRows != null) {
                     param.thisObject.setFieldSilently("mMaxItemsPerPage", newMaxCols * newMaxRows)
                 }
-
-                log(
-                    "FolderSizeDebug",
-                    "setFolderInfo() -> wrote mMaxCountX=$newMaxCols mMaxCountY=$newMaxRows " +
-                        "mMaxItemsPerPage=${if (newMaxCols != null && newMaxRows != null) newMaxCols * newMaxRows else "?"}"
-                )
             }
 
         folderGridOrganizerClass
@@ -525,12 +375,6 @@ class GridOptions (context: Context) : ModPack(context) {
 
                 if (newCols != null) param.thisObject.setFieldSilently("mCountX", newCols)
                 if (newRows != null) param.thisObject.setFieldSilently("mCountY", newRows)
-
-                log(
-                    "FolderSizeDebug",
-                    "setContentSize(itemCount=$itemCount) AOSP natural=$currentCols x $currentRows " +
-                        "configured=$folderGridColumns x $folderGridRows -> wrote $newCols x $newRows"
-                )
             }
 
         folderGridOrganizerClass
@@ -562,51 +406,35 @@ class GridOptions (context: Context) : ModPack(context) {
         // the global setting instead of the real per-folder count was the bug
         // that shrank small (2-4 item) folders too.
 
-        // Only folders with at least this many preview items are affected by
-        // the two user-adjustable sliders below. Folders with 5-6 items still
-        // get the grid layout (AOSP's circular math still can't handle them),
-        // just packed at fixed default tightness/size instead.
-        val SCALE_SLIDER_MIN_ITEMS = 7
-        // William, Aug 2026: matches the new stock-anchored slider defaults
-        // (see folderPreviewIconSpacingScale/folderPreviewIconSizeScale)
-        // rather than the arbitrary previous 0.82/0.9.
+        // William, Aug 2026 (final build): the TEMP sliders are gone - these
+        // stock-anchored constants are the permanently baked-in tuning.
+        // Derivation (from decompiled source): PreviewItemManager
+        // .computePreviewDrawingParams() sets mBaselineIconScale =
+        // previewSize / iconSize (previewSize is exactly our
+        // "availableSpace"), and ClippedFolderIconLayoutRule.scaleForItem()
+        // returns 0.44 * mBaselineIconScale for a 4-icon preview - so stock
+        // always draws each of its 4 preview icons at exactly
+        // 0.44 * availableSpace px. Our iconFootprint works out to
+        // (availableSpace / max(cols, rows)) * spacingFactor * sizeFactor -
+        // treating stock's 4-icon case as an (effective) 2x2 grid and
+        // solving for the product that reproduces stock's
+        // 0.44 * availableSpace gives spacingFactor * sizeFactor = 0.88.
+        // Split as sizeFactor=1.0 (icon fully fills its cell) and
+        // spacingFactor=0.88 (the rest of the work) - matching how William
+        // read the knobs ("icon size" = fill-fraction, "spacing" =
+        // cluster tightness); his hand-tuned 100%/85% landed within ~3% of
+        // the derived 88%.
         val DEFAULT_SPACING_FACTOR = 0.88f
         val DEFAULT_SIZE_FACTOR = 1.0f
-        // William, Aug 2026: matches the gap slider's own default value (2dp)
-        // - see the effectiveGapPx() fix below for why this exists.
         val DEFAULT_GAP_DP = 2
 
         // How close together the cells sit (cluster tightness). Lowering
         // this pulls the whole cluster toward the folder's center.
-        //
-        // William, Aug 2026: TEMP master toggle off now falls back to
-        // DEFAULT_SPACING_FACTOR/DEFAULT_SIZE_FACTOR (our own tuned
-        // defaults) rather than skipping this whole custom system and
-        // letting AOSP's OWN untouched math run for curNumItems>4. AOSP's
-        // native formula (getPosition()/scaleForItem() in the decompiled
-        // ClippedFolderIconLayoutRule.java) was never built for more than 4
-        // preview icons - scaleForItem() returns the SAME 0.44x scale for
-        // any count >=4, so at e.g. 9 items it draws each icon exactly as
-        // large as it would for 4, spread around a ring whose radius also
-        // doesn't grow to compensate - a severely overlapping, "everything
-        // crammed with no visible gaps" mess is exactly what "sets it to
-        // like 0" was describing. Falling back to our own DEFAULT-tuned
-        // grid instead of raw AOSP is what actually gives a sane look with
-        // the toggle off.
-        fun spacingFactorFor(curNumItems: Int): Float = when {
-            !tempModsEnabled -> DEFAULT_SPACING_FACTOR
-            curNumItems >= SCALE_SLIDER_MIN_ITEMS -> folderPreviewIconSpacingScale
-            else -> DEFAULT_SPACING_FACTOR
-        }
+        fun spacingFactorFor(curNumItems: Int): Float = DEFAULT_SPACING_FACTOR
 
         // How much of each cell's pitch the icon itself fills, independent
-        // of spacing - so icon size can be tuned without changing how
-        // tightly packed the cluster is.
-        fun sizeFactorFor(curNumItems: Int): Float = when {
-            !tempModsEnabled -> DEFAULT_SIZE_FACTOR
-            curNumItems >= SCALE_SLIDER_MIN_ITEMS -> folderPreviewIconSizeScale
-            else -> DEFAULT_SIZE_FACTOR
-        }
+        // of spacing.
+        fun sizeFactorFor(curNumItems: Int): Float = DEFAULT_SIZE_FACTOR
 
         // cols/rows: grid shape for this item count.
         // pitch: distance between adjacent cell centers. Unlike a fixed cell
@@ -679,17 +507,11 @@ class GridOptions (context: Context) : ModPack(context) {
         // FolderIcon's mInfo).
         val lastTotalContentsByRule = java.util.WeakHashMap<Any, Int>()
 
-        // William, Aug 2026: TEMP master toggle off previously fell back to a
-        // hardcoded 0dp gap here - but the gap SLIDER's own default is 2dp
-        // (see folderPreviewIconGapTemp/temp_mods.xml), not 0. So even with
-        // every slider left at its default value, toggle-ON used 2dp while
-        // toggle-OFF forced 0dp - a real, confirmed (William: "with it on
-        // and settings at default it should be the same as off... doesn't
-        // make sense") residual mismatch, on top of the already-fixed
-        // spacingFactorFor/sizeFactorFor defaults. Falls back to
-        // DEFAULT_GAP_DP instead of 0, matching that pattern exactly.
-        fun effectiveGapPx(): Float =
-            mContext.toPx(if (tempModsEnabled) folderPreviewIconGapTemp else DEFAULT_GAP_DP).toFloat()
+        // William, Aug 2026 (final build): flat 2dp gap between preview
+        // icons, baked in - purely a taste/spread choice William tuned on
+        // device (stock's implied value is 0, but 2dp is what he settled
+        // on through every round of testing).
+        fun effectiveGapPx(): Float = mContext.toPx(DEFAULT_GAP_DP).toFloat()
 
         // Cols/rows-based placement, used by both the "grid" shape (square,
         // cols = ceil(sqrt(n))) and the "list" shape (fixed 2 columns).
@@ -730,179 +552,11 @@ class GridOptions (context: Context) : ModPack(context) {
             return transX to transY
         }
 
-        // Evenly spaced around a ring instead of a square grid. Radius grows
-        // with the spacing slider (same role it plays for the grid shape)
-        // plus the flat gap, capped so icons stay within availableSpace.
-        //
-        // William, Aug 2026, v54: ring slots are no longer handed out in
-        // plain reading order. Each icon now gets the ring slot angularly
-        // CLOSEST to where that icon sits in the open folder's grid, so the
-        // open/close morph moves icons mostly radially (short hops) instead
-        // of sweeping them halfway around the circle ("can the order of
-        // icons in the circle try and match as closely as possible to the
-        // location when the folder is open, so they don't move super far in
-        // the animation"). Assignment: compute every icon's open-grid
-        // position relative to the cluster center, then greedily claim
-        // slots - outermost grid icons first (corners have the strongest
-        // angular constraint), each taking its nearest free slot; center
-        // icons are equidistant to everything, so they take whatever is
-        // left over. The result is a deterministic pure function of
-        // (count, geometry), so the draw path and the getGridPosition
-        // animation path can never disagree on destinations.
-        fun circlePosition(
-            index: Int,
-            curNumItems: Int,
-            availableSpace: Float,
-            iconFootprint: Float,
-            gapPx: Float,
-            isRtl: Boolean
-        ): Pair<Float, Float> {
-            val center = availableSpace / 2f
-            val maxRadius = ((availableSpace - iconFootprint) / 2f).coerceAtLeast(0f)
-            val radius = (maxRadius * spacingFactorFor(curNumItems) + gapPx).coerceAtMost(maxRadius)
-            val direction = if (isRtl) -1.0 else 1.0
-
-            fun slotAngle(k: Int): Double =
-                direction * (2.0 * PI * k / curNumItems) - PI / 2.0
-
-            fun angularDistance(a: Double, b: Double): Double {
-                val raw = (a - b) % (2.0 * PI)
-                val wrapped = when {
-                    raw > PI -> raw - 2.0 * PI
-                    raw < -PI -> raw + 2.0 * PI
-                    else -> raw
-                }
-                return Math.abs(wrapped)
-            }
-
-            // Open-folder grid position of every icon, relative to the
-            // cluster center - the same geometry gridPosition() draws with
-            // (offsetX + col*pitch + (pitch-fp)/2 + fp/2 - avail/2 collapses
-            // to (col - (cols-1)/2) * pitch).
-            val (cols, rows, basePitch) = gridPitch(curNumItems, availableSpace)
-            val gridPitchVal = (basePitch + gapPx).toDouble()
-            data class GridSpot(val index: Int, val angle: Double, val dist: Double)
-            val gridSpots = (0 until curNumItems).map { i ->
-                val col = i % cols
-                val row = i / cols
-                val gx = ((if (isRtl) cols - 1 - col else col) - (cols - 1) / 2.0) * gridPitchVal
-                val gy = (row - (rows - 1) / 2.0) * gridPitchVal
-                GridSpot(i, atan2(gy, gx), hypot(gx, gy))
-            }
-
-            val slotOfIndex = IntArray(curNumItems)
-            val slotTaken = BooleanArray(curNumItems)
-            for (spot in gridSpots.sortedByDescending { it.dist }) {
-                var bestSlot = 0
-                var bestDist = Double.MAX_VALUE
-                for (k in 0 until curNumItems) {
-                    if (slotTaken[k]) continue
-                    val d = angularDistance(slotAngle(k), spot.angle)
-                    if (d < bestDist) {
-                        bestDist = d
-                        bestSlot = k
-                    }
-                }
-                slotTaken[bestSlot] = true
-                slotOfIndex[spot.index] = bestSlot
-            }
-
-            val angle = slotAngle(slotOfIndex[index])
-            val x = center + (radius * cos(angle)).toFloat() - iconFootprint / 2f
-            val y = center + (radius * sin(angle)).toFloat() - iconFootprint / 2f
-            return x to y
-        }
-
-        // William, Aug 2026, v53: THE honeycomb shape - flower and honeycomb
-        // MERGED back into one arrangement ("we are going to merge the flower
-        // and honeycomb into one kinda"). How we got here:
-        // - v2-v50 "honeycomb" was concentric hex rings (renamed "flower" in
-        //   v51 when the shapes split). Flower@7 was always good (William:
-        //   "flower at 7 is good") but flower@9+ needed a 2nd ring, which
-        //   shrank icons hard ("at 9 it's like it's scaling the size for way
-        //   more apps") and scattered them (his flower@9 screenshot).
-        // - v51/v52 "honeycomb" was staggered/tapered ROWS. William: "in
-        //   theory it's not wrong but it's not what I'd like... i want it
-        //   similar to the flower at 7 layout but with 9 apps."
-        // - v53 (this): ONE shape. Index 0 sits at the CENTER; every
-        //   remaining icon sits EVENLY SPACED on a single ring around it -
-        //   flower@7's exact geometry (same radius, same clockwise-from-12
-        //   order) extended past 6 ring icons by RE-SPACING that one ring
-        //   instead of adding a second one:
-        //     7 -> center + 6 @ 60deg  (slot-for-slot identical to flower@7)
-        //     8 -> center + 7 @ ~51.4deg
-        //     9 -> center + 8 @ 45deg  (octagonal wreath - his Social folder)
-        //    11 -> center + 10 @ 36deg
-        //   Ring radius (v54): (basePitch + gap) / (2*sin(pi/ringCount)) -
-        //   the radius at which adjacent ring icons sit exactly ONE
-        //   STOCK-MATCHED GRID PITCH apart (the same pitch the 3x3 grid
-        //   preview's spacing was tuned to match stock with - see
-        //   spacingFactorFor/DEFAULT_SPACING_FACTOR). Icon SIZE was already
-        //   shared with the grid via iconFootprintFor; this ties the SPREAD
-        //   to the same math too, per William: "the spacing/sizing/scaling
-        //   of this new layout should match stock spacing... change it for
-        //   9 apps, 6 apps, 4 apps specifically." At default sliders a
-        //   7-item wreath still evaluates to the same radius flower@7 had
-        //   (size factor 1.0 makes footprint == pitch), so the look he
-        //   approved is preserved there. Capped so the wreath's outer edge
-        //   stays inside availableSpace; past ~15 items (or large gap
-        //   slider values) the cap makes ring neighbors sit slightly
-        //   tighter rather than shrinking the icons or overflowing.
-        //
-        // Sizing: icons keep the ordinary square-grid footprint (see
-        // iconFootprintFor - the flower-only cap is gone with the merge).
-        // The wreath fits by clamping RADIUS, not by shrinking icons, which
-        // is why 9-item previews stay full-size (the old flower's ring-2
-        // shrink is what William reported as "scaling the size for way more
-        // apps").
-        fun honeycombPosition(
-            index: Int,
-            curNumItems: Int,
-            availableSpace: Float,
-            iconFootprint: Float,
-            gapPx: Float,
-            isRtl: Boolean
-        ): Pair<Float, Float> {
-            val center = availableSpace / 2f
-            val halfIcon = iconFootprint / 2f
-
-            // Index 0: the center of the flower.
-            if (index == 0) {
-                return (center - halfIcon) to (center - halfIcon)
-            }
-
-            val ringCount = (curNumItems - 1).coerceAtLeast(1)
-
-            // v54: one stock grid-pitch between ring neighbors (chord =
-            // 2*r*sin(pi/ringCount) = gridPitch) - see the comment block
-            // above for the full rationale.
-            val (_, _, basePitch) = gridPitch(curNumItems, availableSpace)
-            val idealRadius = ((basePitch + gapPx) / (2.0 * sin(PI / ringCount))).toFloat()
-            val maxRadius = ((availableSpace - iconFootprint) / 2f).coerceAtLeast(0f)
-            val radius = idealRadius.coerceAtMost(maxRadius)
-
-            // Ring icons, clockwise from 12 o'clock - same convention
-            // flower@7 used, so the 7-item case is unchanged.
-            val direction = if (isRtl) -1.0 else 1.0
-            val angle = direction * (2.0 * PI * (index - 1) / ringCount) - PI / 2.0
-            val x = center + (radius * cos(angle)).toFloat() - halfIcon
-            val y = center + (radius * sin(angle)).toFloat() - halfIcon
-            return x to y
-        }
-
-        // Single place both the closed-preview draw path
-        // (repositionPreviewItemAsGrid) and the open/close animation path
-        // (the getGridPosition hook below) pick a shape from, so the two
-        // can never drift out of sync with each other again the way the
-        // animation used to silently ignore custom shapes entirely.
-        //
-        // William, Aug 2026: TEMP master toggle off keeps whatever shape is
-        // selected (only spacingFactorFor/sizeFactorFor/effectiveGapPx fall
-        // back to defaults) - it previously forced "grid" here regardless
-        // of the chosen shape, so toggling off while Honeycomb (or Circle/
-        // List) was selected silently switched the arrangement itself,
-        // which read as "spacing/sizing changed" even though the shape
-        // change was the real difference.
+        // William, Aug 2026 (final build): the experimental shapes (circle/
+        // list/honeycomb/flower) are gone - the square grid is the one and
+        // only closed-preview arrangement, hardcoded. History of the shapes
+        // that were tried and removed here lives in the v51-v54 commits if
+        // it's ever needed again.
         fun previewPosition(
             index: Int,
             curNumItems: Int,
@@ -910,22 +564,12 @@ class GridOptions (context: Context) : ModPack(context) {
             iconFootprint: Float,
             gapPx: Float,
             isRtl: Boolean
-        ): Pair<Float, Float> = when (folderPreviewShapeTemp) {
-            "circle" -> circlePosition(index, curNumItems, availableSpace, iconFootprint, gapPx, isRtl)
-            "list" -> gridPosition(index, curNumItems, availableSpace, iconFootprint, gapPx, isRtl, forcedCols = 2)
-            "honeycomb" -> honeycombPosition(index, curNumItems, availableSpace, iconFootprint, gapPx, isRtl)
-            // "flower" merged back into honeycomb in v53 (single adaptive
-            // ring); a stale stored "flower" value falls through to grid.
-            else -> gridPosition(index, curNumItems, availableSpace, iconFootprint, gapPx, isRtl, forcedCols = null)
-        }
+        ): Pair<Float, Float> =
+            gridPosition(index, curNumItems, availableSpace, iconFootprint, gapPx, isRtl, forcedCols = null)
 
-        // William, Aug 2026, v53: every shape now draws its icons at the
-        // square-grid's own footprint (basePitch * sizeFactorFor). The
-        // flower-only sizing cap died with the v53 merge: the merged
-        // honeycomb wreath fits inside availableSpace by clamping its RING
-        // RADIUS (see honeycombPosition), not by shrinking icons - which is
-        // exactly why 9-item previews stay full-size now instead of the old
-        // flower's "scaling the size for way more apps" shrink.
+        // Icon draw size: the square-grid cell's pitch times the size
+        // factor - shared by the draw path and the scaleForItem animation
+        // hook below so the two can never disagree.
         fun iconFootprintFor(
             curNumItems: Int,
             availableSpace: Float,
@@ -942,20 +586,10 @@ class GridOptions (context: Context) : ModPack(context) {
             resultParams: Any?
         ) {
             lastCurNumItemsByRule[rule] = curNumItems
-            // William, Aug 2026, v54: honeycomb also takes over 4-item
-            // folders ("change it for 9 apps, 6 apps, 4 apps specifically")
-            // - center + 3-icon ring at stock-matched spacing. Counts <= 3
-            // stay on AOSP's own small-folder path.
-            val honeycombTakesOverSmall = curNumItems == 4 && folderPreviewShapeTemp == "honeycomb"
-            if (index < 0 || index >= curNumItems ||
-                (curNumItems <= 4 && !honeycombTakesOverSmall)
-            ) return
-            // TEMP master toggle off no longer bails out here - see the
-            // !tempModsEnabled branches inside spacingFactorFor/
-            // sizeFactorFor/previewPosition above. This function always
-            // runs our own grid math now (default-tuned when the toggle is
-            // off, user-tuned when it's on) instead of ever falling back to
-            // AOSP's own math, which isn't built for curNumItems>4.
+            if (index < 0 || index >= curNumItems || curNumItems <= 4) return
+            // This function always runs our own stock-tuned grid math
+            // instead of ever falling back to AOSP's own math, which isn't
+            // built for curNumItems>4.
 
             val availableSpace = rule.getFieldSilently("mAvailableSpace") as? Float
             val iconSize = rule.getFieldSilently("mIconSize") as? Float
@@ -990,9 +624,6 @@ class GridOptions (context: Context) : ModPack(context) {
             ?.runAfter { param ->
                 val index = param.args.getOrNull(0) as? Int ?: return@runAfter
                 val curNumItems = param.args.getOrNull(1) as? Int ?: return@runAfter
-                if (curNumItems > 4) {
-                    log("FlashDebug", "computePreviewItemDrawingParams[rule] index=$index curNumItems=$curNumItems")
-                }
                 if (index < 0) return@runAfter // workspace destroy/create animation, not a grid slot
                 repositionPreviewItemAsGrid(param.thisObject, index, curNumItems, param.result)
             }
@@ -1025,41 +656,9 @@ class GridOptions (context: Context) : ModPack(context) {
                 if (totalContents != null && totalContents > 0) {
                     lastTotalContentsByRule[rule] = totalContents
                 }
-                if (curNumItems > 4) {
-                    log("FlashDebug", "computePreviewItemDrawingParams[fallback] index=$index curNumItems=$curNumItems")
-                }
                 if (index < 0) return@runAfter // workspace destroy/create animation, not a grid slot
-                // v54: honeycomb takes over 4-item folders too (see
-                // repositionPreviewItemAsGrid above).
-                if (curNumItems <= 4 &&
-                    !(curNumItems == 4 && folderPreviewShapeTemp == "honeycomb")
-                ) return@runAfter
-                // TEMPORARY (William, Aug 2026): HoneycombDebug diagnostics for
-                // Bug 1 ("Social" folder honeycomb renders clustered in the
-                // upper-left above 7 items). For every grid-slot call this
-                // prints index, curNumItems, what AOSP's own method body just
-                // computed into the result params BEFORE our override runs
-                // (for index >= 4 that should be AOSP's corner-stacking point,
-                // i.e. all three values identical), and what
-                // repositionPreviewItemAsGrid left behind AFTER - so the log
-                // directly shows (a) the folder's real curNumItems, (b) whether
-                // any grid slot is skipped or silently not overridden (post ==
-                // pre means repositionPreviewItemAsGrid bailed early for that
-                // index, e.g. null/zero mAvailableSpace). Capture with:
-                //   adb logcat -d -s HoneycombDebug:V > log.txt
-                // Remove this whole block once Bug 1 is confirmed fixed.
-                val preOverrideX = param.result?.getFieldSilently("transX")
-                val preOverrideY = param.result?.getFieldSilently("transY")
-                val preOverrideScale = param.result?.getFieldSilently("scale")
+                if (curNumItems <= 4) return@runAfter
                 repositionPreviewItemAsGrid(rule, index, curNumItems, param.result)
-                log(
-                    "HoneycombDebug",
-                    "computePreview[index=$index curNumItems=$curNumItems] " +
-                        "aospPre=(x=$preOverrideX, y=$preOverrideY, scale=$preOverrideScale) -> " +
-                        "oursPost=(x=${param.result?.getFieldSilently("transX")}, " +
-                        "y=${param.result?.getFieldSilently("transY")}, " +
-                        "scale=${param.result?.getFieldSilently("scale")})"
-                )
             }
 
         // Fixes the open/close "flash": FolderAnimationManager.getAnimator()
@@ -1079,15 +678,7 @@ class GridOptions (context: Context) : ModPack(context) {
             ?.hookMethod("scaleForItem")
             ?.runAfter { param ->
                 val curNumItems = lastCurNumItemsByRule[param.thisObject] ?: return@runAfter
-                // v54: honeycomb takes over 4-item folders too (see
-                // repositionPreviewItemAsGrid above) - the open/close
-                // animation needs our scale for those as well, or it would
-                // morph to AOSP's 0.44x while the preview draws our size.
-                if (curNumItems <= 4 &&
-                    !(curNumItems == 4 && folderPreviewShapeTemp == "honeycomb")
-                ) return@runAfter
-                // TEMP master toggle off no longer bails out here - see
-                // spacingFactorFor/sizeFactorFor's !tempModsEnabled branch.
+                if (curNumItems <= 4) return@runAfter
 
                 val availableSpace = param.thisObject.getFieldSilently("mAvailableSpace") as? Float
                 val iconSize = param.thisObject.getFieldSilently("mIconSize") as? Float
@@ -1100,7 +691,6 @@ class GridOptions (context: Context) : ModPack(context) {
                 val iconFootprint = iconFootprintFor(curNumItems, availableSpace, gapPx, pitch)
                 val result = iconFootprint / iconSize
                 param.result = result
-                log("FlashDebug", "scaleForItem -> curNumItems=$curNumItems pitch=$pitch scale=$result")
             }
 
         // Real fix (William, Aug 2026) for the open/close animation itself
@@ -1138,16 +728,8 @@ class GridOptions (context: Context) : ModPack(context) {
         clippedFolderIconLayoutRuleClass
             ?.hookMethod("getGridPosition")
             ?.runAfter { param ->
-                // TEMP master toggle off no longer bails out here either -
-                // see spacingFactorFor/sizeFactorFor/previewPosition's
-                // !tempModsEnabled branches.
                 val curNumItems = lastCurNumItemsByRule[param.thisObject] ?: return@runAfter
-                // v54: honeycomb takes over 4-item folders too (see
-                // repositionPreviewItemAsGrid above) - the close morph needs
-                // our destinations for those as well.
-                if (curNumItems <= 4 &&
-                    !(curNumItems == 4 && folderPreviewShapeTemp == "honeycomb")
-                ) return@runAfter
+                if (curNumItems <= 4) return@runAfter
 
                 val row = param.args.getOrNull(0) as? Int ?: return@runAfter
                 val col = param.args.getOrNull(1) as? Int ?: return@runAfter
@@ -1196,30 +778,14 @@ class GridOptions (context: Context) : ModPack(context) {
                 // preview slot, staying inside the folder for the morph.
                 val indexInBounds = row * callerCols + col
                 val index = indexInBounds.coerceIn(0, curNumItems - 1)
-                if (indexInBounds != index) {
-                    log(
-                        "FlashDebug",
-                        "getGridPosition: index=$indexInBounds out of range for " +
-                            "curNumItems=$curNumItems (row=$row col=$col callerCols=$callerCols) - " +
-                            "clamping to $index"
-                    )
-                }
 
                 val gapPx = effectiveGapPx()
                 val iconFootprint = iconFootprintFor(curNumItems, availableSpace, gapPx, basePitch)
                 val (transX, transY) =
                     previewPosition(index, curNumItems, availableSpace, iconFootprint, gapPx, isRtl)
 
-                val aospX = fArr[0]
-                val aospY = fArr[1]
                 fArr[0] = transX
                 fArr[1] = transY
-                log(
-                    "FlashDebug",
-                    "getGridPosition(row=$row, col=$col) curNumItems=$curNumItems " +
-                        "callerCols=$callerCols previewCols=$previewCols index=$index -> " +
-                        "aosp=($aospX, $aospY) ours=($transX, $transY)"
-                )
             }
 
         // Close-animation "glitch" fix (William, Aug 2026), history:
@@ -1294,152 +860,31 @@ class GridOptions (context: Context) : ModPack(context) {
                 }
             }
 
-        // TEMPORARY (William, Aug 2026) - diagnostic logging for the open/close
-        // flash investigation only. Every line this block adds is tagged
-        // "FlashDebug" so it's easy to find and delete once the flash is
-        // confirmed fixed (delete this whole block, and the two log() calls
-        // added above in the computePreviewItemDrawingParams hooks and the
-        // scaleForItem hook). To capture a timeline:
-        //   adb shell am force-stop com.google.android.apps.nexuslauncher
-        //   adb logcat | findstr FlashDebug
-        // then open, then close, one folder with 7+ preview icons.
-        val folderClass = findClass(
-            "com.android.launcher3.folder.Folder",
-            suppressError = true
-        )
-        folderClass
-            ?.hookMethod("animateOpen")
-            ?.runBefore { log("FlashDebug", "Folder.animateOpen() start") }
-        folderClass
-            ?.hookMethod("closeComplete")
-            ?.runBefore { log("FlashDebug", "Folder.closeComplete() start") }
-
-        // animateClosed() is confirmed "Method not found" on Folder in this
-        // build (a v15 diagnostic class dump showed animateOpen/closeComplete
-        // both still exist, but no animateClosed at all - it's gone, not just
-        // renamed-and-still-1-arg). The dump's closest candidate by shape is
-        // handleClose(boolean) - unverified whether it plays the same role,
-        // so this is still just a log marker, not a functional hook, until
-        // the FlashDebug timeline confirms it fires at the right point in
-        // the close sequence.
-        folderClass
-            ?.hookMethod("handleClose")
-            ?.runBefore { log("FlashDebug", "Folder.handleClose() start") }
-
-        // TEMPORARY (William, Aug 2026): diagnostic-only. The v15 dump also
-        // showed FolderAnimationManager - the class our whole open/close
-        // flash theory (scaleForItem -> getAnimator) was built on - doesn't
-        // exist on this device at all. Folder.getFolderAnimationManager()
-        // actually returns a com.android.launcher3.folder.
-        // FolderAnimationSpringBuilderManager instead (presumably this
-        // Pixel Launcher version switched the folder open/close animation
-        // to spring physics instead of a single Animator). This dumps that
-        // real class once so its actual method surface is known before
-        // attempting a real fix for the flash. Remove this whole block once
-        // that's done.
-        var folderAnimationManagerDumped = false
-        folderClass
-            ?.hookMethod("getFolderAnimationManager")
-            ?.runAfter { param ->
-                if (folderAnimationManagerDumped) return@runAfter
-                folderAnimationManagerDumped = true
-                log("FlashDebug", "getFolderAnimationManager() returned ${param.result?.javaClass?.name}")
-                param.result?.javaClass.dumpClass()
-            }
-
-        // TEMPORARY (William, Aug 2026): diagnostic-only. The v16 dump of
-        // FolderAnimationSpringBuilderManager (confirmed via logcat) showed
-        // exactly one non-Object method: createAnimatorSet(boolean) ->
-        // AnimatorSet. That's the real thing driving the open/close visual -
-        // this logs what it actually built (whether isOpening, and what each
-        // child Animator's target is) so the flash mechanism can be
-        // understood before attempting a real fix, instead of guessing. The
-        // scaleForItem values feeding into it are already confirmed correct
-        // (see the scaleForItem log above), so if the flash is still visible
-        // the mismatch has to be somewhere in here - e.g. animating a
-        // snapshot/drawable captured before our repositioning ran, rather
-        // than the live preview. Remove this whole block once diagnosed.
+        // Real fix (William, Aug 2026, confirmed on-device) for "only ~4
+        // icons animate, then the real 9 pop in a second later": the spring
+        // animation builder (FolderAnimationSpringBuilderManager
+        // .createAnimatorSet) reads PreviewItemManager.mCurrentPageParams
+        // raw - and that list is EMPTY at animation-build time for both
+        // open and close (v23 capture: mFirstPageParams.size=9 correct,
+        // mCurrentPageParams.size=0). Ordinary drawing tolerates the empty
+        // list (falls back to mFirstPageParams somewhere), which is why the
+        // closed icon and fully-opened folder render correctly - but the
+        // animator builder has no such fallback, so it built its per-icon
+        // springs from an empty/short list. Fix: if mCurrentPageParams is
+        // empty and mFirstPageParams isn't, copy the latter's contents into
+        // the former before the animator set is built. A copy (new
+        // ArrayList), not the same list reference, so later mutation of one
+        // doesn't alias the other.
         val folderAnimationSpringBuilderManagerClass = findClass(
             "com.android.launcher3.folder.FolderAnimationSpringBuilderManager",
             suppressError = true
         )
         folderAnimationSpringBuilderManagerClass
             ?.hookMethod("createAnimatorSet")
-            ?.runAfter { param ->
-                val isOpening = param.args.getOrNull(0)
-                val animatorSet = param.result as? android.animation.AnimatorSet
-                // TEMPORARY (William, Aug 2026): added startDelay/duration to
-                // this existing log line. v24 fixed the empty-mCurrentPageParams
-                // issue (confirmed: the mid-animation frame now shows icons
-                // still in the correct grid layout, shrinking, instead of the
-                // old 4-icon diamond), but William still sees 4 icons appear
-                // first and the rest "catch up" about a second later on open.
-                // getStartDelay()/getDuration() are standard Animator methods -
-                // no field-name guessing needed - and will show directly
-                // whether some children are scheduled to start much later than
-                // others, which would explain a staggered per-icon entrance
-                // tuned for AOSP's max-4 assumption. Remove once diagnosed.
-                val children = animatorSet?.childAnimations?.joinToString(", ") { anim ->
-                    val target = (anim as? android.animation.ObjectAnimator)?.target
-                    "${anim.javaClass.simpleName}(target=${target?.javaClass?.name}, " +
-                        "propertyName=${(anim as? android.animation.ObjectAnimator)?.propertyName}, " +
-                        "startDelay=${anim.startDelay}, duration=${anim.duration})"
-                } ?: "null"
-                log(
-                    "FlashDebug",
-                    "createAnimatorSet(isOpening=$isOpening) childCount=" +
-                        "${animatorSet?.childAnimations?.size} totalDuration=${animatorSet?.duration} " +
-                        "children=[$children]"
-                )
-            }
-
-        // TEMPORARY (William, Aug 2026): diagnostic-only. The childCount from
-        // the hook above (~50-51) didn't visibly change between two separate
-        // opens of the same 9-item folder, which doesn't tell us whether it
-        // scales with item count at all - and those animators are all
-        // untargeted ValueAnimators (invisible closures), so we can't tell
-        // from the outside whether they're driving per-icon positions or
-        // something item-count-independent (e.g. the background blob shape).
-        // PreviewItemManager (already confirmed via dump: fields mNumOfPrevItems,
-        // mCurrentPageParams, mFirstPageParams) is the object that actually
-        // knows how many preview items exist - if mNumOfPrevItems is stuck at
-        // 4 right when the animator set is built, that's the real smoking gun
-        // for "why only 4 icons animate." Reached via the already-verified
-        // chain FolderAnimationSpringBuilderManager.folder (Folder) ->
-        // Folder.mFolderIcon (FolderIcon) -> FolderIcon.mPreviewItemManager
-        // (PreviewItemManager) - mFolderIcon/mPreviewItemManager are standard
-        // AOSP field names; mPreviewItemManager is the same field the
-        // existing computePreviewItemDrawingParams[fallback] hook above
-        // already reaches successfully via mIcon.mPreviewLayoutRule (mIcon is
-        // PreviewItemManager's back-reference to FolderIcon - same object,
-        // opposite direction). Remove this whole hook once diagnosed.
-        // Candidate real fix (William, Aug 2026), replacing the previous
-        // log-only version of this hook. The v23 capture confirmed
-        // mFirstPageParams.size=9 (correct) but mCurrentPageParams.size=0
-        // (empty) right when createAnimatorSet() is about to build - for
-        // BOTH the open and close animation. Ordinary drawing evidently
-        // tolerates an empty mCurrentPageParams (falls back to
-        // mFirstPageParams somewhere, e.g. in drawParams()), which is why
-        // the closed icon and the fully-opened folder both render
-        // correctly - but the spring animation builder likely reads the raw
-        // mCurrentPageParams field directly with no such fallback, so it's
-        // building its per-icon springs from an empty/short list. That
-        // matches the symptom exactly: only ~4 icons animate, then the real
-        // 9 "pop in" once a real draw() pass runs after the animation ends.
-        // Fix: if mCurrentPageParams is empty and mFirstPageParams isn't,
-        // copy mFirstPageParams's contents into mCurrentPageParams before
-        // the animator set is built. A copy (new ArrayList), not the same
-        // list reference, so later mutation of one doesn't alias the other.
-        // Logging is kept so this same capture also shows whether the copy
-        // took effect. Remove the logging once this is confirmed fixed;
-        // keep the copy itself if it is.
-        folderAnimationSpringBuilderManagerClass
-            ?.hookMethod("createAnimatorSet")
             ?.runBefore { param ->
                 val folder = param.thisObject.getFieldSilently("folder")
                 val folderIcon = folder?.getFieldSilently("mFolderIcon")
                 val previewItemManager = folderIcon?.getFieldSilently("mPreviewItemManager")
-                val numOfPrevItems = previewItemManager?.getFieldSilently("mNumOfPrevItems")
                 val currentPageParams =
                     previewItemManager?.getFieldSilently("mCurrentPageParams") as? ArrayList<Any?>
                 val firstPageParams =
@@ -1453,46 +898,6 @@ class GridOptions (context: Context) : ModPack(context) {
                         ArrayList(firstPageParams)
                     )
                 }
-
-                val currentPageParamsAfter =
-                    previewItemManager?.getFieldSilently("mCurrentPageParams") as? ArrayList<*>
-                log(
-                    "FlashDebug",
-                    "createAnimatorSet about to build: previewItemManager=" +
-                        "${previewItemManager != null} mNumOfPrevItems=$numOfPrevItems " +
-                        "mCurrentPageParams.size(before)=${currentPageParams?.size} " +
-                        "mCurrentPageParams.size(after)=${currentPageParamsAfter?.size} " +
-                        "mFirstPageParams.size=${firstPageParams?.size}"
-                )
-            }
-
-        // TEMPORARY (William, Aug 2026): diagnostic-only. The v25 capture
-        // showed the animation itself finishes in well under a second
-        // (createAnimatorSet's own animators top out around 400-450ms,
-        // matching the animateOpen()->createAnimatorSet and handleClose()->
-        // closeComplete() timestamps), so the ~1-second "shows 4, then
-        // corrects to 9" William still sees on CLOSE must be happening AFTER
-        // closeComplete() - in however the closed folder icon gets redrawn
-        // afterward, which nothing so far has been watching. draw() is a
-        // confirmed real method on PreviewItemManager (from the v16 class
-        // dump). This logs every actual draw call's item-count snapshot, so
-        // we can see when a draw with the correct count finally happens
-        // after close, and what (if anything) precedes it. Remove once
-        // diagnosed.
-        previewItemManagerClass
-            ?.hookMethod("draw")
-            ?.runBefore { param ->
-                val currentPageParams =
-                    param.thisObject.getFieldSilently("mCurrentPageParams") as? ArrayList<*>
-                val firstPageParams =
-                    param.thisObject.getFieldSilently("mFirstPageParams") as? ArrayList<*>
-                val numOfPrevItems = param.thisObject.getFieldSilently("mNumOfPrevItems")
-                log(
-                    "FlashDebug",
-                    "PreviewItemManager.draw() mNumOfPrevItems=$numOfPrevItems " +
-                        "mCurrentPageParams.size=${currentPageParams?.size} " +
-                        "mFirstPageParams.size=${firstPageParams?.size}"
-                )
             }
     }
 }

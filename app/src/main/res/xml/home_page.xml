@@ -48,16 +48,6 @@
         app:fragment="com.drdisagree.pixellauncherenhanced.ui.fragments.MiscellaneousMods"
         app:showArrow="false" />
 
-    <!-- TEMPORARY (William, Aug 2026): whole entry. See TEMP_MASTER_ENABLE in
-         Constants.kt for removal instructions. -->
-    <com.drdisagree.pixellauncherenhanced.ui.preferences.PreferenceMainMenu
-        android:icon="@drawable/ic_temp"
-        android:key="launcherTemp"
-        android:summary="@string/fragment_temp_desc"
-        android:title="@string/fragment_temp_title"
-        app:fragment="com.drdisagree.pixellauncherenhanced.ui.fragments.TempMods"
-        app:showArrow="false" />
-
     <com.drdisagree.pixellauncherenhanced.ui.preferences.PreferenceMainMenu
         android:icon="@drawable/ic_about"
         android:key="launcherAbout"
