@@ -31,8 +31,10 @@ import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.setFieldSilently
 import com.drdisagree.pixellauncherenhanced.xposed.utils.XPrefs.Xprefs
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import kotlin.math.PI
+import kotlin.math.atan2
 import kotlin.math.ceil
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -731,6 +733,22 @@ class GridOptions (context: Context) : ModPack(context) {
         // Evenly spaced around a ring instead of a square grid. Radius grows
         // with the spacing slider (same role it plays for the grid shape)
         // plus the flat gap, capped so icons stay within availableSpace.
+        //
+        // William, Aug 2026, v54: ring slots are no longer handed out in
+        // plain reading order. Each icon now gets the ring slot angularly
+        // CLOSEST to where that icon sits in the open folder's grid, so the
+        // open/close morph moves icons mostly radially (short hops) instead
+        // of sweeping them halfway around the circle ("can the order of
+        // icons in the circle try and match as closely as possible to the
+        // location when the folder is open, so they don't move super far in
+        // the animation"). Assignment: compute every icon's open-grid
+        // position relative to the cluster center, then greedily claim
+        // slots - outermost grid icons first (corners have the strongest
+        // angular constraint), each taking its nearest free slot; center
+        // icons are equidistant to everything, so they take whatever is
+        // left over. The result is a deterministic pure function of
+        // (count, geometry), so the draw path and the getGridPosition
+        // animation path can never disagree on destinations.
         fun circlePosition(
             index: Int,
             curNumItems: Int,
@@ -743,7 +761,53 @@ class GridOptions (context: Context) : ModPack(context) {
             val maxRadius = ((availableSpace - iconFootprint) / 2f).coerceAtLeast(0f)
             val radius = (maxRadius * spacingFactorFor(curNumItems) + gapPx).coerceAtMost(maxRadius)
             val direction = if (isRtl) -1.0 else 1.0
-            val angle = direction * (2.0 * PI * index / curNumItems) - PI / 2.0
+
+            fun slotAngle(k: Int): Double =
+                direction * (2.0 * PI * k / curNumItems) - PI / 2.0
+
+            fun angularDistance(a: Double, b: Double): Double {
+                val raw = (a - b) % (2.0 * PI)
+                val wrapped = when {
+                    raw > PI -> raw - 2.0 * PI
+                    raw < -PI -> raw + 2.0 * PI
+                    else -> raw
+                }
+                return Math.abs(wrapped)
+            }
+
+            // Open-folder grid position of every icon, relative to the
+            // cluster center - the same geometry gridPosition() draws with
+            // (offsetX + col*pitch + (pitch-fp)/2 + fp/2 - avail/2 collapses
+            // to (col - (cols-1)/2) * pitch).
+            val (cols, rows, basePitch) = gridPitch(curNumItems, availableSpace)
+            val gridPitchVal = (basePitch + gapPx).toDouble()
+            data class GridSpot(val index: Int, val angle: Double, val dist: Double)
+            val gridSpots = (0 until curNumItems).map { i ->
+                val col = i % cols
+                val row = i / cols
+                val gx = ((if (isRtl) cols - 1 - col else col) - (cols - 1) / 2.0) * gridPitchVal
+                val gy = (row - (rows - 1) / 2.0) * gridPitchVal
+                GridSpot(i, atan2(gy, gx), hypot(gx, gy))
+            }
+
+            val slotOfIndex = IntArray(curNumItems)
+            val slotTaken = BooleanArray(curNumItems)
+            for (spot in gridSpots.sortedByDescending { it.dist }) {
+                var bestSlot = 0
+                var bestDist = Double.MAX_VALUE
+                for (k in 0 until curNumItems) {
+                    if (slotTaken[k]) continue
+                    val d = angularDistance(slotAngle(k), spot.angle)
+                    if (d < bestDist) {
+                        bestDist = d
+                        bestSlot = k
+                    }
+                }
+                slotTaken[bestSlot] = true
+                slotOfIndex[spot.index] = bestSlot
+            }
+
+            val angle = slotAngle(slotOfIndex[index])
             val x = center + (radius * cos(angle)).toFloat() - iconFootprint / 2f
             val y = center + (radius * sin(angle)).toFloat() - iconFootprint / 2f
             return x to y
@@ -769,12 +833,21 @@ class GridOptions (context: Context) : ModPack(context) {
         //     8 -> center + 7 @ ~51.4deg
         //     9 -> center + 8 @ 45deg  (octagonal wreath - his Social folder)
         //    11 -> center + 10 @ 36deg
-        //   Ring radius = cellPitch / (2*sin(pi/ringCount)): the radius at
-        //   which adjacent ring icons sit exactly cellPitch apart. For 6
-        //   icons that evaluates to exactly 1*cellPitch, matching flower@7
-        //   byte-for-byte. Capped so the wreath's outer edge stays inside
-        //   availableSpace; past ~15 items the cap makes ring neighbors sit
-        //   slightly tighter rather than shrinking the icons.
+        //   Ring radius (v54): (basePitch + gap) / (2*sin(pi/ringCount)) -
+        //   the radius at which adjacent ring icons sit exactly ONE
+        //   STOCK-MATCHED GRID PITCH apart (the same pitch the 3x3 grid
+        //   preview's spacing was tuned to match stock with - see
+        //   spacingFactorFor/DEFAULT_SPACING_FACTOR). Icon SIZE was already
+        //   shared with the grid via iconFootprintFor; this ties the SPREAD
+        //   to the same math too, per William: "the spacing/sizing/scaling
+        //   of this new layout should match stock spacing... change it for
+        //   9 apps, 6 apps, 4 apps specifically." At default sliders a
+        //   7-item wreath still evaluates to the same radius flower@7 had
+        //   (size factor 1.0 makes footprint == pitch), so the look he
+        //   approved is preserved there. Capped so the wreath's outer edge
+        //   stays inside availableSpace; past ~15 items (or large gap
+        //   slider values) the cap makes ring neighbors sit slightly
+        //   tighter rather than shrinking the icons or overflowing.
         //
         // Sizing: icons keep the ordinary square-grid footprint (see
         // iconFootprintFor - the flower-only cap is gone with the merge).
@@ -798,12 +871,13 @@ class GridOptions (context: Context) : ModPack(context) {
                 return (center - halfIcon) to (center - halfIcon)
             }
 
-            val cellPitch = iconFootprint + gapPx
             val ringCount = (curNumItems - 1).coerceAtLeast(1)
 
-            // Radius at which adjacent ring icons sit exactly cellPitch
-            // apart (chord length = 2*r*sin(pi/ringCount) = cellPitch).
-            val idealRadius = (cellPitch / (2.0 * sin(PI / ringCount))).toFloat()
+            // v54: one stock grid-pitch between ring neighbors (chord =
+            // 2*r*sin(pi/ringCount) = gridPitch) - see the comment block
+            // above for the full rationale.
+            val (_, _, basePitch) = gridPitch(curNumItems, availableSpace)
+            val idealRadius = ((basePitch + gapPx) / (2.0 * sin(PI / ringCount))).toFloat()
             val maxRadius = ((availableSpace - iconFootprint) / 2f).coerceAtLeast(0f)
             val radius = idealRadius.coerceAtMost(maxRadius)
 
@@ -868,7 +942,14 @@ class GridOptions (context: Context) : ModPack(context) {
             resultParams: Any?
         ) {
             lastCurNumItemsByRule[rule] = curNumItems
-            if (index < 0 || index >= curNumItems || curNumItems <= 4) return
+            // William, Aug 2026, v54: honeycomb also takes over 4-item
+            // folders ("change it for 9 apps, 6 apps, 4 apps specifically")
+            // - center + 3-icon ring at stock-matched spacing. Counts <= 3
+            // stay on AOSP's own small-folder path.
+            val honeycombTakesOverSmall = curNumItems == 4 && folderPreviewShapeTemp == "honeycomb"
+            if (index < 0 || index >= curNumItems ||
+                (curNumItems <= 4 && !honeycombTakesOverSmall)
+            ) return
             // TEMP master toggle off no longer bails out here - see the
             // !tempModsEnabled branches inside spacingFactorFor/
             // sizeFactorFor/previewPosition above. This function always
@@ -948,7 +1029,11 @@ class GridOptions (context: Context) : ModPack(context) {
                     log("FlashDebug", "computePreviewItemDrawingParams[fallback] index=$index curNumItems=$curNumItems")
                 }
                 if (index < 0) return@runAfter // workspace destroy/create animation, not a grid slot
-                if (curNumItems <= 4) return@runAfter
+                // v54: honeycomb takes over 4-item folders too (see
+                // repositionPreviewItemAsGrid above).
+                if (curNumItems <= 4 &&
+                    !(curNumItems == 4 && folderPreviewShapeTemp == "honeycomb")
+                ) return@runAfter
                 // TEMPORARY (William, Aug 2026): HoneycombDebug diagnostics for
                 // Bug 1 ("Social" folder honeycomb renders clustered in the
                 // upper-left above 7 items). For every grid-slot call this
@@ -994,7 +1079,13 @@ class GridOptions (context: Context) : ModPack(context) {
             ?.hookMethod("scaleForItem")
             ?.runAfter { param ->
                 val curNumItems = lastCurNumItemsByRule[param.thisObject] ?: return@runAfter
-                if (curNumItems <= 4) return@runAfter
+                // v54: honeycomb takes over 4-item folders too (see
+                // repositionPreviewItemAsGrid above) - the open/close
+                // animation needs our scale for those as well, or it would
+                // morph to AOSP's 0.44x while the preview draws our size.
+                if (curNumItems <= 4 &&
+                    !(curNumItems == 4 && folderPreviewShapeTemp == "honeycomb")
+                ) return@runAfter
                 // TEMP master toggle off no longer bails out here - see
                 // spacingFactorFor/sizeFactorFor's !tempModsEnabled branch.
 
@@ -1051,7 +1142,12 @@ class GridOptions (context: Context) : ModPack(context) {
                 // see spacingFactorFor/sizeFactorFor/previewPosition's
                 // !tempModsEnabled branches.
                 val curNumItems = lastCurNumItemsByRule[param.thisObject] ?: return@runAfter
-                if (curNumItems <= 4) return@runAfter
+                // v54: honeycomb takes over 4-item folders too (see
+                // repositionPreviewItemAsGrid above) - the close morph needs
+                // our destinations for those as well.
+                if (curNumItems <= 4 &&
+                    !(curNumItems == 4 && folderPreviewShapeTemp == "honeycomb")
+                ) return@runAfter
 
                 val row = param.args.getOrNull(0) as? Int ?: return@runAfter
                 val col = param.args.getOrNull(1) as? Int ?: return@runAfter
