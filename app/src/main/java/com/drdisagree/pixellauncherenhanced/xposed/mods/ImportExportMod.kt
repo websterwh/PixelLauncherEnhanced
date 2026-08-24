@@ -1,6 +1,9 @@
 package com.drdisagree.pixellauncherenhanced.xposed.mods
 
 import android.app.Activity
+import android.appwidget.AppWidgetHost
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -13,6 +16,7 @@ import android.widget.Toast
 import com.drdisagree.pixellauncherenhanced.xposed.HookEntry.Companion.enqueueProxyCommand
 import com.drdisagree.pixellauncherenhanced.xposed.ModPack
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.XposedHook.Companion.findClass
+import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getStaticFieldSilently
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.hookMethod
 import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam
 import org.xmlpull.v1.XmlPullParser
@@ -49,8 +53,15 @@ import java.io.InputStream
  *    build it throws "same process should call model directly" for any
  *    in-process call (confirmed on-device, Aug 2026) - it only serves
  *    external callers. Semantics: WIPE & REPLACE (a restore, matching
- *    William's manual db-swap workflow). Widgets are skipped (their bindings
- *    are device-specific and cannot survive an XML round-trip).
+ *    William's manual db-swap workflow).
+ * 4b. WIDGETS - the stock Export writes <appwidget> tags (provider
+ *     component + spans + position). Restored for real: a fresh AppWidget id
+ *     is allocated on the launcher's own host and bound to the provider
+ *     in-process (the launcher holds BIND_APPWIDGET), then the row is
+ *     written with that id. Widgets whose app isn't installed are skipped.
+ *     Restored widgets come back at their DEFAULT configuration - per-widget
+ *     settings are keyed to the old widget id inside the widget's own app
+ *     and cannot survive an XML round-trip.
  * 5. RESTART - toast + root killall via the existing proxy so LoaderTask
  *    re-reads the table fresh.
  */
@@ -61,6 +72,10 @@ class ImportExportMod(context: Context) : ModPack(context) {
         private const val CONTAINER_HOTSEAT = -101
         private const val ITEM_TYPE_APPLICATION = 0
         private const val ITEM_TYPE_FOLDER = 2
+        private const val ITEM_TYPE_WIDGET = 4
+        // AOSP Launcher3's LauncherAppWidgetHost id; read from the launcher's
+        // own class at runtime when possible (see appWidgetHostId()).
+        private const val FALLBACK_APPWIDGET_HOST_ID = 1024
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -130,8 +145,11 @@ class ImportExportMod(context: Context) : ModPack(context) {
                     append("Imported ")
                     if (success.folders > 0) append("${success.folders} folder(s) and ")
                     append("${success.apps} app(s)")
+                    if (success.widgetsRestored > 0) {
+                        append(", ${success.widgetsRestored} widget(s)")
+                    }
                     if (success.widgetsSkipped > 0) {
-                        append(" (${success.widgetsSkipped} widget(s) skipped)")
+                        append(" (${success.widgetsSkipped} widget(s) skipped - app missing?)")
                     }
                     append(" - restarting...")
                 }
@@ -165,16 +183,22 @@ class ImportExportMod(context: Context) : ModPack(context) {
         val children: MutableList<ParsedItem>? // non-null only for folders
     )
 
-    private class ImportCounts(val apps: Int, val folders: Int, val widgetsSkipped: Int)
+    private class ImportCounts(
+        val apps: Int,
+        val folders: Int,
+        val widgetsRestored: Int,
+        val widgetsSkipped: Int
+    )
 
     private fun importLayout(uri: Uri): ImportCounts {
         // Parse EVERYTHING before touching the database, so a malformed file
         // can never leave the workspace half-wiped.
         val topItems = parseLayout(openStream(uri))
-        val widgetsSkipped = countWidgets(topItems)
 
         var apps = 0
         var folders = 0
+        var widgetsRestored = 0
+        var widgetsSkipped = 0
 
         // Write DIRECTLY to the favorites SQLite database. The
         // LauncherProvider route is dead by design: on this build the
@@ -204,7 +228,10 @@ class ImportExportMod(context: Context) : ModPack(context) {
                 db.delete("favorites", null, null)
 
                 for (item in topItems) {
-                    if (item.isWidget) continue
+                    if (item.isWidget) {
+                        if (insertWidget(db, item)) widgetsRestored++ else widgetsSkipped++
+                        continue
+                    }
                     insertItemTree(db, item, rank = 0)
                     if (item.itemType == ITEM_TYPE_FOLDER) folders++ else apps++
                 }
@@ -217,7 +244,7 @@ class ImportExportMod(context: Context) : ModPack(context) {
             db.close()
         }
 
-        return ImportCounts(apps, folders, widgetsSkipped)
+        return ImportCounts(apps, folders, widgetsRestored, widgetsSkipped)
     }
 
     // The favorites database name varies by launcher grid (William's device
@@ -259,6 +286,50 @@ class ImportExportMod(context: Context) : ModPack(context) {
         }
     }
 
+    // Widget restore: allocate a real AppWidget id on the LAUNCHER's own
+    // host id, bind the provider (we run inside the launcher process, which
+    // holds BIND_APPWIDGET as the default home - no user consent prompt
+    // needed), then write the favorites row with that id. Returns false when
+    // the widget's app isn't installed or the provider refuses the bind -
+    // the row is then simply skipped. NOTE: a restored widget comes back at
+    // its DEFAULT configuration - per-widget settings live in the widget's
+    // own app, keyed to the old (device-specific) widget id, and cannot
+    // survive an XML round-trip.
+    private fun insertWidget(db: SQLiteDatabase, item: ParsedItem): Boolean {
+        val packageName = item.packageName ?: return false
+        val className = item.className ?: return false
+        val provider = ComponentName(packageName, className)
+
+        val appWidgetManager = AppWidgetManager.getInstance(mContext)
+        val host = AppWidgetHost(mContext, appWidgetHostId())
+        val appWidgetId = host.allocateAppWidgetId()
+
+        val bound = try {
+            appWidgetManager.bindAppWidgetIdIfAllowed(appWidgetId, provider)
+        } catch (_: Throwable) {
+            false
+        }
+        if (!bound) {
+            host.deleteAppWidgetId(appWidgetId)
+            return false
+        }
+
+        val values = buildValues(item, rank = 0).apply {
+            put("appWidgetId", appWidgetId)
+            put("appWidgetProvider", provider.flattenToString())
+        }
+        val inserted = db.insert("favorites", null, values) >= 0
+        if (!inserted) host.deleteAppWidgetId(appWidgetId)
+        return inserted
+    }
+
+    // The launcher's own host id, so its AppWidgetHost adopts our allocated
+    // ids when it next starts listening.
+    private fun appWidgetHostId(): Int =
+        findClass("com.android.launcher3.LauncherAppWidgetHost")
+            ?.getStaticFieldSilently("APPWIDGET_HOST_ID") as? Int
+            ?: FALLBACK_APPWIDGET_HOST_ID
+
     private fun buildValues(item: ParsedItem, rank: Int): ContentValues = ContentValues().apply {
         put("itemType", item.itemType)
         put("container", item.container)
@@ -271,7 +342,7 @@ class ImportExportMod(context: Context) : ModPack(context) {
         put("title", item.title)
         put(
             "intent",
-            if (item.itemType == ITEM_TYPE_FOLDER ||
+            if (item.itemType != ITEM_TYPE_APPLICATION ||
                 item.packageName == null || item.className == null
             ) {
                 null
@@ -332,6 +403,30 @@ class ImportExportMod(context: Context) : ModPack(context) {
                         )
                         (folderStack.lastOrNull()?.children ?: topItems).add(folder)
                         folderStack.add(folder)
+                    }
+
+                    "appwidget" -> {
+                        // Stock Export writes widgets as
+                        // <appwidget container spanX spanY x y screen
+                        //  className packageName> (confirmed from a real
+                        // export, Aug 2026) - className is the provider's
+                        // receiver class.
+                        val item = ParsedItem(
+                            itemType = ITEM_TYPE_WIDGET,
+                            container = resolveContainer(attr(parser, "container"))
+                                ?: CONTAINER_DESKTOP,
+                            screen = attrInt(parser, "screen"),
+                            cellX = attrInt(parser, "x"),
+                            cellY = attrInt(parser, "y"),
+                            spanX = attrInt(parser, "spanX", 1),
+                            spanY = attrInt(parser, "spanY", 1),
+                            title = null,
+                            packageName = attr(parser, "packageName"),
+                            className = attr(parser, "className"),
+                            isWidget = true,
+                            children = null
+                        )
+                        (folderStack.lastOrNull()?.children ?: topItems).add(item)
                     }
 
                     "autoinstall" -> {
@@ -396,14 +491,6 @@ class ImportExportMod(context: Context) : ModPack(context) {
         }
 
         return topItems
-    }
-
-    private fun countWidgets(items: List<ParsedItem>): Int {
-        var count = items.count { it.isWidget }
-        for (item in items) {
-            if (item.children != null) count += countWidgets(item.children)
-        }
-        return count
     }
 
     private fun resolveContainer(value: String?): Int? = when (value) {
