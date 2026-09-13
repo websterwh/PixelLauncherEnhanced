@@ -380,11 +380,43 @@ class GridOptions (context: Context) : ModPack(context) {
         folderGridOrganizerClass
             .hookMethod("previewItemsForPage")
             .runAfter { param ->
-                if (folderPreviewIconCount == 0) return@runAfter
                 val page = param.args.getOrNull(0) as? Int ?: return@runAfter
+                val contents = param.args.getOrNull(1) as? List<*> ?: return@runAfter
+
+                // William, Sep 2026: this is native AOSP big-folder behavior
+                // (FolderGridOrganizer.mDisplayingUpperLeftQuadrant flips
+                // true for ANY folder with >4 items, stock or not), and it's
+                // the REAL cause of the "stray icon left after closing from
+                // page >= 1" bug - confirmed via logcat with the getGridPosition
+                // page-guard above already in place and correctly bailing
+                // (animatedPage=1 detected, no override applied), yet the
+                // icon still stuck around. Root cause: AOSP's own
+                // isItemInPreview(page, indexOnPage), once
+                // mDisplayingUpperLeftQuadrant is true, treats every PAGE's
+                // own upper-left 2x2 as "in preview" - not just page 0's.
+                // FolderAnimationSpringBuilderManager.createAnimatorSet
+                // skips the close-direction alpha-fade spring for any icon
+                // in that per-page list, so a lone page-2 icon (trivially
+                // "upper-left" of its own page) never fades out - it just
+                // gets its translation/scale reset to identity at animation
+                // end while staying fully opaque, which is the stray icon.
+                // Our closed-icon preview is a FIXED page-0-derived grid
+                // (repositionPreviewItemAsGrid) - it never reflects
+                // "whichever page you're on" the way AOSP's own multi-page
+                // preview concept assumes, so that concept must be
+                // disabled entirely for us: report empty for every page
+                // other than 0 once a folder is in "big folder" territory
+                // (>4 items total), so every non-zero-page icon gets the
+                // normal fade-out on open/close, matching a folder that
+                // simply has no preview items on that page.
+                if (contents.size > 4 && page != 0) {
+                    param.result = ArrayList<Any?>()
+                    return@runAfter
+                }
+
+                if (folderPreviewIconCount == 0) return@runAfter
                 if (page != 0) return@runAfter // only override the closed-icon preview (page 0)
 
-                val contents = param.args.getOrNull(1) as? List<*> ?: return@runAfter
                 val count = min(folderPreviewIconCount, contents.size)
                 param.result = ArrayList(contents.subList(0, count))
             }
