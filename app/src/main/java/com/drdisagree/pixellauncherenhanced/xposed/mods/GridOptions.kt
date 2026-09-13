@@ -507,6 +507,31 @@ class GridOptions (context: Context) : ModPack(context) {
         // FolderIcon's mInfo).
         val lastTotalContentsByRule = java.util.WeakHashMap<Any, Int>()
 
+        // William, Sep 2026: fixes "stray icon left on the preview" when a
+        // folder bigger than the AOSP default is closed (or reopened) from
+        // page >= 1 without returning to page 0 first. Root cause confirmed
+        // from decompiled source (FolderAnimationSpringBuilderManager
+        // .createAnimatorSet / FolderGridOrganizer.isItemInPreview): once a
+        // folder has >4 items, isItemInPreview treats EVERY page's own
+        // upper-left 2x2 as "in preview" (mDisplayingUpperLeftQuadrant),
+        // and createAnimatorSet calls getGridPosition(i/mCountX, i%mCountX)
+        // with i being the icon's index WITHIN THE CURRENT PAGE - not a
+        // global reading-order index. Our getGridPosition hook (below)
+        // always treated that (row, col) as global preview coordinates,
+        // which only happens to be correct for page 0 (where page-relative
+        // index == global index). For page >= 1 it silently maps that
+        // page's icons onto page-0's preview slots, producing bogus
+        // destinations for whichever of those icons AOSP's own quadrant
+        // rule decided not to fade out - which is what shows up as a stray
+        // icon sitting in/near the closed preview. Cache keyed by the
+        // layout rule (same rule instance getGridPosition receives as
+        // thisObject) so that hook can bail out and leave AOSP's own
+        // per-page math untouched whenever the page isn't 0. Populated in
+        // the createAnimatorSet hook below, mirroring how AOSP itself picks
+        // the page (getCurrentPage() when opening, getDestinationPage()
+        // when closing - see decompiled source).
+        val lastAnimatedPageByRule = java.util.WeakHashMap<Any, Int>()
+
         // William, Aug 2026 (final build): flat 2dp gap between preview
         // icons, baked in - purely a taste/spread choice William tuned on
         // device (stock's implied value is 0, but 2dp is what he settled
@@ -731,6 +756,18 @@ class GridOptions (context: Context) : ModPack(context) {
                 val curNumItems = lastCurNumItemsByRule[param.thisObject] ?: return@runAfter
                 if (curNumItems <= 4) return@runAfter
 
+                // William, Sep 2026: bail out for open/close animations that
+                // aren't walking page 0 - see lastAnimatedPageByRule above.
+                // Our (row, col) -> global-index reconstruction below only
+                // holds when the caller's row/col are page-0/global preview
+                // coordinates; for page >= 1 they're page-relative, and
+                // reinterpreting them as global coordinates is exactly what
+                // produced the stray-icon bug. Leaving fArr untouched here
+                // means AOSP's own (unmodified) per-page math drives those
+                // icons instead - same as if this hook never ran.
+                val animatedPage = lastAnimatedPageByRule[param.thisObject]
+                if (animatedPage != null && animatedPage != 0) return@runAfter
+
                 val row = param.args.getOrNull(0) as? Int ?: return@runAfter
                 val col = param.args.getOrNull(1) as? Int ?: return@runAfter
                 val fArr = param.args.getOrNull(2) as? FloatArray ?: return@runAfter
@@ -897,6 +934,26 @@ class GridOptions (context: Context) : ModPack(context) {
                         "mCurrentPageParams",
                         ArrayList(firstPageParams)
                     )
+                }
+
+                // William, Sep 2026: record which page this open/close
+                // animation is actually walking, matching AOSP's own choice
+                // (decompiled createAnimatorSet: currentPage2 = isOpening ?
+                // mContent.getCurrentPage() : mContent.getDestinationPage(),
+                // no RTL adjustment - that's a separate flipped variable
+                // used only for the reveal-rect math). See
+                // lastAnimatedPageByRule above for why getGridPosition needs
+                // this.
+                val isOpening = param.args.getOrNull(0) as? Boolean
+                val layoutRule = folderIcon?.callMethodSilently("getLayoutRule")
+                val mContent = folder?.getFieldSilently("mContent")
+                if (isOpening != null && layoutRule != null && mContent != null) {
+                    val page = mContent.callMethodSilently(
+                        if (isOpening) "getCurrentPage" else "getDestinationPage"
+                    ) as? Int
+                    if (page != null) {
+                        lastAnimatedPageByRule[layoutRule] = page
+                    }
                 }
             }
     }
