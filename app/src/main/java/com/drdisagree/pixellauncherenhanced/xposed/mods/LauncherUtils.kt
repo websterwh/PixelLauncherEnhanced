@@ -23,6 +23,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
 
 class LauncherUtils(context: Context) : ModPack(context) {
 
@@ -192,19 +193,29 @@ class LauncherUtils(context: Context) : ModPack(context) {
                     }
                 }
 
-                // Was mModel.callMethod("forceReload") - that throws
-                // NoSuchMethodError and takes the whole launcher process down
-                // with it on builds where LauncherModel#forceReload() has been
-                // renamed/removed (confirmed via crash log on William's
-                // device, Aug 2026: "FATAL EXCEPTION... NoSuchMethodError:
-                // com.android.launcher3.LauncherModel#forceReload()", right
-                // before the launcher process got SIG 9'd and auto-respawned -
-                // almost certainly a real cause, maybe THE cause, of the
-                // "restarts twice" symptom, since that respawn is invisible/
-                // unexplained and can land right next to a legitimate,
-                // intentional restartLauncher() toast). callMethodSilently
-                // just no-ops instead of crashing if the method isn't there.
-                mModel.callMethodSilently("forceReload")
+// forceReload() is the method that reloads the model, but its signature
+                // is not stable across launcher builds:
+                //  - William, Aug 2026: on his build the no-arg overload was
+                //    GONE, and the no-arg call threw NoSuchMethodError from
+                //    inside the hook - which took the whole launcher process
+                //    down (FATAL EXCEPTION ... NoSuchMethodError:
+                //    com.android.launcher3.LauncherModel#forceReload) right
+                //    before it got SIG 9'd and auto-respawned - almost
+                //    certainly the real cause of the "restarts twice" symptom.
+                //  - Verified against the Android 17 launcher build
+                //    (NexusLauncherRelease versionCode 907) via dexdump: the
+                //    ONLY forceReload there is
+                //    forceReload(String) -> CompletionStage, alongside
+                //    reloadIfActive(String). So a bare callMethodSilently(
+                //    "forceReload") is a silent no-op there - reloadIcons
+                //    simply stops working.
+                // Try the no-arg form first (older builds), then the
+                // String-arg form that current builds expose.
+                try {
+                    mModel.callMethod("forceReload")
+                } catch (_: Throwable) {
+                    mModel.callMethod("forceReload", "reloadIcons")
+                }
             }
         }
     }

@@ -14,6 +14,7 @@ import com.drdisagree.pixellauncherenhanced.xposed.mods.LauncherUtils.Companion.
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.Helpers.toPx
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.XposedHook.Companion.findClass
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.callMethodSilently
+import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getAnyField
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getField
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getFieldSilently
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getStaticFieldSilently
@@ -29,7 +30,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
-class GridOptions (context: Context) : ModPack(context) {
+class GridOptions(context: Context) : ModPack(context) {
 
     private var homeScreenGridRows = 0
     private var homeScreenGridColumns = 0
@@ -83,31 +84,34 @@ class GridOptions (context: Context) : ModPack(context) {
 
         fun Any.hookDeviceProfile() {
             val temp = getFieldSilently("iconSizePx") as? Int
-            val mHotseatProfile = getFieldSilently("mHotseatProfile")
-            val mDisplayOptionSpec = getFieldSilently("mDisplayOptionSpec")
+            val mHotseatProfile = getAnyField("mHotseatProfile", "hotseatProfile")
+            val mDisplayOptionSpec = getAnyField("mDisplayOptionSpec", "displayOptionSpec")
 
             if (effectiveDockColumns != 0) {
-                setFieldSilently("numShownHotseatIcons", effectiveDockColumns)
                 mHotseatProfile?.setField("numShownIcons", effectiveDockColumns)
             }
 
-            // numFolderRows/numFolderColumns are declared `final` on DeviceProfile,
-            // so this is a best-effort fallback for any code path that reads them
-            // straight off DeviceProfile without going through the "grid"/GridOption
-            // object patched below (which is where the value normally ought to come
-            // from, before folder cell sizes are computed from it).
+            // William, Sep 2026: the folder cell grid is not on DeviceProfile in
+            // this build - it never carried these two fields (verified by dexdump
+            // on the Android 17 launcher, NexusLauncherRelease versionCode 907),
+            // so the old setFieldSilently() calls here were silent no-ops and
+            // FOLDER_GRID_ROWS/COLUMNS did nothing. The counts live on
+            // DeviceProfile.folderProfile (FolderProfile) as plain ints now; the
+            // InvariantDeviceProfile copies of the same names are int[] in this
+            // build, so an Int cannot be written to those.
+            val mFolderProfile = getAnyField("mFolderProfile", "folderProfile")
             if (folderGridRows != 0) {
-                setFieldSilently("numFolderRows", folderGridRows)
+                mFolderProfile?.setFieldSilently("numRows", folderGridRows)
             }
             if (folderGridColumns != 0) {
-                setFieldSilently("numFolderColumns", folderGridColumns)
+                mFolderProfile?.setFieldSilently("numColumns", folderGridColumns)
             }
 
             if (appDrawerGridColumns != 0) {
                 setFieldSilently("numShownAllAppsColumns", appDrawerGridColumns)
 
                 if (temp == null) {
-                    val mAllAppsProfile = getField("mAllAppsProfile")
+                    val mAllAppsProfile = getAnyField("mAllAppsProfile", "allAppsProfile")
                     mAllAppsProfile.setFieldSilently("numShownAllAppsColumns", appDrawerGridColumns)
                 }
             }
@@ -134,69 +138,47 @@ class GridOptions (context: Context) : ModPack(context) {
                 param.result.hookDeviceProfile()
             }
 
+        // William, Sep 2026: this whole block was rewritten for the Android 17
+        // launcher build (NexusLauncherRelease versionCode 907, dexdump-verified).
+        //
+        // initGrid is now initGrid(String)V - one argument, not three - and
+        // DisplayOptionSpec no longer has a "grid" field, so the old
+        // runBefore never fired (its args.size >= 3 guard was always false) and
+        // would have thrown NoSuchFieldError from getField("grid") if it had.
+        // "numHotseatIcons" is gone from every class in the dex.
+        //
+        // invDistWeightedInterpolate() is gone from InvariantDeviceProfile too -
+        // the module's own boot-time error dump on-device already reported
+        // "Method not found: invDistWeightedInterpolate in class
+        // InvariantDeviceProfile", so that hook never installed either. The
+        // profile it used to patch is now built in the DeviceProfile constructor
+        // and Builder.build(), both already hooked above via
+        // hookDeviceProfile(), so there is nothing left to patch here.
         invariantDeviceProfileClass
             .hookMethod("initGrid")
-            .runBefore { param ->
-                if (param.args.size >= 3) {
-                    val displayOption = param.args[2]
-                    val closestProfile = displayOption.getField("grid")
-
-                    if (effectiveDockColumns != 0) {
-                        closestProfile.setField("numHotseatIcons", effectiveDockColumns)
-                    }
-                    if (folderGridRows != 0) {
-                        closestProfile.setFieldSilently("numFolderRows", folderGridRows)
-                    }
-                    if (folderGridColumns != 0) {
-                        closestProfile.setFieldSilently("numFolderColumns", folderGridColumns)
-                    }
-                }
-            }
             .runAfter { param ->
                 param.thisObject.apply {
+                    // Still plain ints on InvariantDeviceProfile.
                     if (homeScreenGridRows != 0) {
                         setField("numRows", homeScreenGridRows)
                     }
                     if (homeScreenGridColumns != 0) {
                         setField("numColumns", homeScreenGridColumns)
                     }
+
+                    // numShownHotseatIcons moved off InvariantDeviceProfile onto
+                    // DisplayOptionSpec. The old setField() here threw
+                    // NoSuchFieldError (setField does not swallow), which aborted
+                    // this block and silently skipped everything below it.
                     if (effectiveDockColumns != 0) {
-                        setField("numShownHotseatIcons", effectiveDockColumns)
+                        getFieldSilently("displayOptionSpec")
+                            ?.setFieldSilently("numShownHotseatIcons", effectiveDockColumns)
                     }
-                    if (folderGridRows != 0) {
-                        setFieldSilently("numFolderRows", folderGridRows)
-                    }
-                    if (folderGridColumns != 0) {
-                        setFieldSilently("numFolderColumns", folderGridColumns)
-                    }
-                }
-            }
 
-        invariantDeviceProfileClass
-            .hookMethod("invDistWeightedInterpolate")
-            .runAfter { param ->
-                val displayOption = param.result
-                val closestProfile = displayOption.getField("grid")
-
-                if (homeScreenGridRows != 0) {
-                    closestProfile.setFieldSilently("numRows", homeScreenGridRows)
-                }
-                if (homeScreenGridColumns != 0) {
-                    closestProfile.setFieldSilently("numColumns", homeScreenGridColumns)
-                }
-                if (effectiveDockColumns != 0) {
-                    closestProfile.setFieldSilently("numHotseatIcons", effectiveDockColumns)
-                    closestProfile.setFieldSilently("numDatabaseHotseatIcons", effectiveDockColumns)
-                }
-                if (folderGridRows != 0) {
-                    closestProfile.setFieldSilently("numFolderRows", folderGridRows)
-                }
-                if (folderGridColumns != 0) {
-                    closestProfile.setFieldSilently("numFolderColumns", folderGridColumns)
-                }
-                if (appDrawerGridColumns != 0) {
-                    closestProfile.setFieldSilently("numAllAppsColumns", homeScreenGridColumns)
-                    closestProfile.setFieldSilently("numDatabaseAllAppsColumns", homeScreenGridColumns)
+                    // Folder sizing is NOT applied here: InvariantDeviceProfile's
+                    // numFolderRows/numFolderColumns are int[] in this build, so an
+                    // Int cannot be written to them. It is handled against
+                    // FolderProfile in hookDeviceProfile() above.
                 }
             }
 

@@ -2,7 +2,6 @@ package com.drdisagree.pixellauncherenhanced.xposed.mods
 
 import android.content.Context
 import android.graphics.Rect
-import android.util.AttributeSet
 import android.view.View
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.DESKTOP_DOCK_SPACING
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.DESKTOP_ICON_HORIZONTAL_MARGIN
@@ -14,7 +13,7 @@ import com.drdisagree.pixellauncherenhanced.xposed.mods.LauncherUtils.Companion.
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.Helpers.toPx
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.ResourceHookManager
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.XposedHook.Companion.findClass
-import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.callMethodSilently
+import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getAnyField
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getField
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getFieldSilently
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.hookConstructor
@@ -31,6 +30,14 @@ class HotseatMod(context: Context) : ModPack(context) {
     private var desktopIconHorizontalMargin = 0
     private var dockBottomSpacing = 0
     private var mQuickSearchBar: View? = null
+
+    // William, Sep 2026: the most recently built DeviceProfile. Launcher has no
+    // getDeviceProfile() and no deviceProfileRef field on the Android 17
+    // launcher build (NexusLauncherRelease versionCode 907) - both are gone
+    // (dexdump-verified) - so there is no longer a way to reach the profile
+    // from the Workspace. Capturing it from the constructor/builder hooks
+    // below is the replacement; both run before the Workspace is ever laid out.
+    private var mDeviceProfile: Any? = null
 
     override fun updatePrefs(vararg key: String) {
         Xprefs.apply {
@@ -89,11 +96,18 @@ class HotseatMod(context: Context) : ModPack(context) {
         // Each (owner, fieldName) pair below is tried in order so this also
         // keeps working if a future/older build still uses the old shape.
         fun Any.hookDockBottomSpacing() {
+            // Cached for the Workspace.setInsets() hook below, which has no way
+            // left to reach the profile through the Launcher.
+            mDeviceProfile = this
             val alreadyAdjusted = !dockBottomSpacingAdjusted.add(this)
 
             if (dockBottomSpacing != 0 && !alreadyAdjusted) {
                 val deltaPx = mContext.toPx(dockBottomSpacing)
-                val hotseatProfile = getFieldSilently("mHotseatProfile")
+                // William, Sep 2026: the field is "hotseatProfile" on this build -
+                // the m-prefix was dropped from every DeviceProfile field in the
+                // Android 17 launcher. getFieldSilently() returned null here, so
+                // DOCK_BOTTOM_SPACING silently did nothing.
+                val hotseatProfile = getAnyField("mHotseatProfile", "hotseatProfile")
 
                 fun adjustField(fieldName: String) {
                     val candidates = listOfNotNull(
@@ -168,11 +182,6 @@ class HotseatMod(context: Context) : ModPack(context) {
 
         hotseatClass
             .hookConstructor()
-            .parameters(
-                Context::class.java,
-                AttributeSet::class.java,
-                Int::class.javaPrimitiveType
-            )
             .runAfter { param ->
                 mQuickSearchBar = param.thisObject.getField("mQsb") as View
                 triggerSearchBarVisibility()
@@ -190,14 +199,18 @@ class HotseatMod(context: Context) : ModPack(context) {
         workspaceClass
             .hookMethod("setInsets")
             .runAfter { param ->
-                val mLauncher = param.thisObject.getField("mLauncher")
-                val grid = mLauncher.callMethodSilently("getDeviceProfile")
-                    ?: mLauncher
-                        .getField("deviceProfileRef")
-                        .getField("value")
+                // William, Sep 2026: Launcher no longer has getDeviceProfile() or
+                // a deviceProfileRef field on the Android 17 launcher build
+                // (dexdump-verified on NexusLauncherRelease versionCode 907), so
+                // the old lookup chain ended in a throwing getField("deviceProfileRef")
+                // that aborted this hook - which is why DESKTOP_DOCK_SPACING stopped
+                // doing anything after the update. Use the DeviceProfile captured in
+                // hookDockBottomSpacing() instead; it is built before the Workspace
+                // gets laid out, so it is always populated by the time setInsets runs.
+                val grid = mDeviceProfile ?: return@runAfter
                 val padding = grid.getFieldSilently("workspacePadding") as? Rect
                     ?: grid
-                        .getField("mWorkspaceProfile")
+                        .getAnyField("mWorkspaceProfile", "workspaceProfile")
                         .getField("workspacePadding") as Rect
                 val workspace = param.thisObject as View
 
