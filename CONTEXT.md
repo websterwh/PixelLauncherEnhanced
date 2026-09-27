@@ -4,8 +4,9 @@ Everything an agent or human needs to continue this project from scratch.
 Read this before touching anything. Companion docs: `AGENTS.md` (rules of
 engagement), `CLAUDE.md` (pointer file for Claude Code).
 
-Last updated: Aug 24, 2026. Current release: **v1.2.0 (versionCode 6)**,
-branch `layout-tweaks`.
+Last updated: Sep 27, 2026. Current release: **v1.2.0 (versionCode 6)**,
+branch `layout-tweaks`. Built against Android 17 / Pixel Launcher 907 as of
+round v56 — see §4a for the field map, and read it before touching any hook.
 
 ---
 
@@ -167,6 +168,44 @@ For `curNumItems > 4` (else stock AOSP path):
 | 8 | Stock Import button does nothing | `onActivityResult`/ActivityResultLauncher callback is a stub; picked URI goes nowhere (proven by before/after file-timestamp snapshot: zero writes) | ImportExportMod (above) |
 | 9 | Toast "Restarting launcherâ€¦" garbage | UTF-8 ellipsis double-encoded in `strings.xml` (also `search_hint`) | ASCII `...` |
 | 10 | Stray icon left in closed preview when closing (or reopening) a >4-item folder from page ≥ 1 (e.g. a full 4x4 page 0 plus a page 1) | `FolderGridOrganizer.previewItemsForPage`: once a folder has >4 items, AOSP's `mDisplayingUpperLeftQuadrant` flips true and `isItemInPreview` treats EVERY page's own upper-left 2x2 as "in preview" — not just page 0's — so `createAnimatorSet` skips the close-direction alpha-fade for a lone page-N icon; it snaps to identity transform while staying opaque | `previewItemsForPage` hook reports an empty preview list for any page != 0 once `contents.size > 4` (our closed preview is a fixed page-0-derived grid, so no page has "its own" preview items); paired with the pre-existing `getGridPosition` page-guard (bails out of custom position math for non-zero pages, added first but insufficient alone) |
+| 11 | Android 17 (SDK 37) update killed the layout patches: hide desktop search bar, dock column count, desktop/dock spacing | Pixel Launcher 907 dropped the `m` prefix from every `DeviceProfile` field, removed the 3-arg `Hotseat` ctor, split `initGrid` to 1 arg, dropped `invDistWeightedInterpolate`, and moved `numShownHotseatIcons`/`numFolderRows` onto new carrier objects | v56: merged upstream `getAnyField` compat work, then re-pointed the remaining hooks at the objects that actually carry the values now (see §4a) |
+
+
+## 4a. Android 17 launcher (versionCode 907) field map
+
+Evidence: `adb pull /system_ext/priv-app/NexusLauncherRelease.apk` then
+`$ANDROID_HOME/build-tools/37.0.0/dexdump -d classes.dex`. No jadx needed —
+class/method/field signatures are all in the dexdump listing. Two of these
+were confirmed independently by the module's own on-device boot error dump
+(`NoSuchMethodError: Hotseat(Context, AttributeSet, int)#exact`,
+`Method not found: invDistWeightedInterpolate`).
+
+| Old (gone) | New (use this) |
+|---|---|
+| `DeviceProfile.mHotseatProfile` | `DeviceProfile.hotseatProfile` |
+| `DeviceProfile.mWorkspaceProfile` | `DeviceProfile.workspaceProfile` |
+| `DeviceProfile.mDisplayOptionSpec` | `DeviceProfile.displayOptionSpec` |
+| `DeviceProfile.mAllAppsProfile` | `DeviceProfile.allAppsProfile` |
+| `DeviceProfile.mFolderProfile` | `DeviceProfile.folderProfile` |
+| `DeviceProfile.mInvariantDeviceProfile` | `DeviceProfile.inv` |
+| `Hotseat(Context, AttributeSet, int)` | `Hotseat(Context)` / `Hotseat(Context, AttributeSet)` |
+| `DeviceProfile.numShownHotseatIcons` | `DisplayOptionSpec.numShownHotseatIcons` |
+| `DeviceProfile.numFolderRows/Columns` | `FolderProfile.numRows/numColumns` (Int) — the `InvariantDeviceProfile` copies are now `int[]` |
+| `DisplayOptionSpec.grid` + `GridOption.numHotseatIcons` | gone entirely; the per-profile objects are read directly |
+| `InvariantDeviceProfile.initGrid(a,b,c)` | `initGrid(String)` |
+| `InvariantDeviceProfile.invDistWeightedInterpolate` | gone; profile is built in the `DeviceProfile` ctor / `Builder.build()` |
+| `Launcher.getDeviceProfile()` / `Launcher.deviceProfileRef` | gone; capture the `DeviceProfile` from its constructor |
+| `LauncherModel.forceReload()` | `forceReload(String) -> CompletionStage` |
+| `IDP.numShownHotseatIcons` | `IDP.displayOptionSpec.numShownHotseatIcons` |
+
+Unchanged and still valid: `Hotseat.mQsb`, `Hotseat.setInsets`,
+`DeviceProfile.getHotseatLayoutPadding`, `HotseatProfile.{numShownIcons,
+barSizePx, barBottomSpacePx}`, `WorkspaceProfile.workspacePadding`, the
+`qsb_widget_height` dimen, `IDP.{numRows, numColumns, numDatabaseHotseatIcons}`.
+
+**Rule that came out of this**: a `getFieldSilently()` that misses is
+invisible — no error dump, no log, the setting just quietly does nothing.
+Field renames are the failure mode that will not announce itself.
 
 ## 5. Things tried and REVERTED (learned the hard way)
 
@@ -223,6 +262,16 @@ For `curNumItems > 4` (else stock AOSP path):
   animation's per-cell pitch inside `getGridPosition` is AOSP's own formula,
   not ours (we only override destinations for icons the builder walks).
   Never observed as a problem after Bug 5's fix.
+- **~200ms blank-then-populate delay** on the closed icon when closing a
+  multi-page (>4-item) folder from page ≥ 1 (William noticed this right
+  after Bug 10's fix and asked about it). A/B tested via on-device screen
+  recording + frame extraction: the same delay is present in `c74861d`
+  (the commit BEFORE Bug 10's `previewItemsForPage` fix), so it's not a
+  regression from that fix. Matches `PreviewItemManager`'s own
+  `mShouldSlideInFirstPage`/`mCurrentPageItemsTransX` mechanism (decompiled
+  source) — a stock AOSP transition for "sliding" the closed icon back to
+  its page-0 preview when closed from a different page. William chose to
+  leave it as-is (stock-matched behavior, not a bug).
 - **Drag-reorder animations + accessibility** still reference AOSP's
   hardcoded 4-icon preview (pre-existing upstream gap, left as-is).
 - Import is **wipe & replace** by design (William's choice).
