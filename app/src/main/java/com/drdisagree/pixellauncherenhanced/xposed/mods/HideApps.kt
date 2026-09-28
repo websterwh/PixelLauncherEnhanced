@@ -82,7 +82,6 @@ class HideApps(context: Context) : ModPack(context) {
             findClass("com.android.launcher3.uioverrides.QuickstepLauncher")
         val alphabeticalAppsListClass =
             findClass("com.android.launcher3.allapps.AlphabeticalAppsList")
-        val allAppsStoreClass = findClass("com.android.launcher3.allapps.AllAppsStore")
         val appInfoClass = findClass("com.android.launcher3.model.data.AppInfo")
         val allAppsListClass = findClass("com.android.launcher3.model.AllAppsList")
         val launcherModelClass = findClass("com.android.launcher3.LauncherModel")
@@ -120,15 +119,21 @@ class HideApps(context: Context) : ModPack(context) {
                 }
             }
 
-        allAppsStoreClass
-            .hookMethod("setApps")
-            .runAfter { param ->
-                val apps = param.args[0]
-
-                if (apps != null) {
-                    param.thisObject.setExtraField("mAppsBackup", apps)
-                }
-            }
+        // William, Sep 2026: the old AllAppsStore#setApps hook is gone. Two
+        // reasons, both verified against the Android 17 launcher (dexdump on
+        // NexusLauncherRelease versionCode 907):
+        //  1. AllAppsStore has no setApps method at all now - it has
+        //     addUpdateListener / getApp / notifyUpdate / registerIconContainer
+        //     / updateAllIcons. mApps (now an AppInfo[] instead of a List) is
+        //     only ever assigned from the constructor, so the hook never
+        //     installed and logged "Method not found" on every boot.
+        //  2. It was dead weight even where it did install: all it did was
+        //     stash the unfiltered list into an extra field "mAppsBackup",
+        //     which nothing in the module ever read. The actual hiding is
+        //     done entirely by the Arrays#binarySearch hook below, which does
+        //     not depend on it.
+        // Do not re-add a setApps hook here; if the app-list population point
+        // moves again, binarySearch is the thing that has to keep working.
 
         @Suppress("UNCHECKED_CAST")
         Arrays::class.java

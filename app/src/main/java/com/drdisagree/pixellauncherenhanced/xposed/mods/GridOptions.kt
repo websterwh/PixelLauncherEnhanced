@@ -658,8 +658,17 @@ class GridOptions(context: Context) : ModPack(context) {
         }
 
         // Primary path (AOSP master): the rule class owns the method directly.
+        //
+        // William, Sep 2026: on the Android 17 launcher this method does NOT
+        // exist on the rule class (verified by dexdump on NexusLauncherRelease
+        // versionCode 907 - ClippedFolderIconLayoutRule only has getGridPosition,
+        // getPosition and scaleForItem), so this hook always missed and logged
+        // "Method not found" on every boot. That is expected, not a problem:
+        // the body was inlined into PreviewItemManager, which the fallback hook
+        // below handles. suppressError() so the boot error dump stays clean.
         clippedFolderIconLayoutRuleClass
             ?.hookMethod("computePreviewItemDrawingParams")
+            ?.suppressError()
             ?.runAfter { param ->
                 val index = param.args.getOrNull(0) as? Int ?: return@runAfter
                 val curNumItems = param.args.getOrNull(1) as? Int ?: return@runAfter

@@ -3,6 +3,19 @@
 <p align="center">
 Pixel Launcher Enhanced is an Xposed module designed to unlock a variety of exciting features for your launcher. Even though the name suggests it's for Pixel Launcher, it also fully supports Launcher3. From customizing the look to adding more functionality, this module enhances your launcher experience with minimal effort.
 </p>
+
+> [!NOTE]
+> **This is a fork** with folder-preview rework, working Import/Export, and
+> fixes for the **Android 17 (SDK 37) / Pixel Launcher 907** refactor.
+> Upstream: [Mahmud0808/PixelLauncherEnhanced](https://github.com/Mahmud0808/PixelLauncherEnhanced).
+> The feature list below is upstream's and still broadly accurate.
+>
+> Hooked classes and fields move between launcher builds, and a hook that
+> misses a renamed field fails **silently** — no crash, no log, the setting
+> just quietly stops working. If something looks broken after a system update,
+> check the old→new field map in [`CONTEXT.md` §4a](CONTEXT.md) before
+> debugging the feature itself; [`AGENTS.md`](AGENTS.md) has build/test workflow.
+
 <br>
 <p align="center">
   <a href="https://github.com/Mahmud0808/PixelLauncherEnhanced/releases"><img src="https://img.shields.io/github/downloads/Mahmud0808/PixelLauncherEnhanced/total?color=%233DDC84&logo=android&logoColor=%23fff&style=for-the-badge" alt="Downloads"></a>

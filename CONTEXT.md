@@ -71,9 +71,10 @@ cd PixelLauncherEnhanced
 ### Deliverable convention
 
 Current APK kept at the workspace root:
-`PLEnhanced-v1.2.0-release-signed.apk`. Historical per-round APKs/patches
-were deleted; every round is reproducible from git history (branch
-`layout-tweaks`, commit messages `vNN: description`).
+`PLEnhanced-v1.2.0-android17-release-signed.apk` (signed with the release
+keystore, cert `e6026394…`, so it installs over previous builds).
+Historical per-round APKs/patches were deleted; every round is reproducible
+from git history (branch `layout-tweaks`, commit messages `vNN: description`).
 
 ## 3. Architecture
 

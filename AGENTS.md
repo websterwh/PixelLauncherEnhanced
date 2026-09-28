@@ -8,15 +8,19 @@ checklist.
 ## Build / install / test
 
 ```
-.\gradlew.bat assembleRelease        # signed (keystore.properties), R8 minified
-.\gradlew.bat assembleDebug          # fallback/debug
-adb install -r "C:\Users\William\Documents\projects\android\PLEFork\PLEnhanced-v1.2.0-release-signed.apk"
+./gradlew assembleRelease             # signed (keystore.properties), R8 minified
+./gradlew assembleDebug               # fallback/debug
+adb install -r "../PLEnhanced-v1.2.0-android17-release-signed.apk"
 adb shell am force-stop com.google.android.apps.nexuslauncher
 ```
 
 - Release signing needs `keystore.properties` (repo root, gitignored) →
-  keystore in `C:\Users\William\Documents\projects\android\.KEYS\PixelLauncherEnhanced\`.
+  keystore at the path it names (Linux:
+  `~/Documents/projects/.KEYS/PixelLauncherEnhanced/PLEnhanced.keystore`).
   NEVER commit keystore.properties, local.properties, or any .jks.
+- There is no committed `gradlew` script on Linux — invoke the wrapper jar
+  directly: `java -cp gradle/wrapper/gradle-wrapper.jar
+  org.gradle.wrapper.GradleWrapperMain assembleRelease --no-daemon`.
 - Signature changes require uninstall → module settings reset. Don't flip
   between debug/release signing casually.
 - After installing, ALWAYS `force-stop` the launcher. Warn the user that
