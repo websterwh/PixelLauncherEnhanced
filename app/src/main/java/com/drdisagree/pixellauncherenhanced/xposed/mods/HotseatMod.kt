@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Rect
 import android.view.View
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.DESKTOP_DOCK_SPACING
+import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getFieldSilently
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.DESKTOP_ICON_HORIZONTAL_MARGIN
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.DESKTOP_SEARCH_BAR
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.DESKTOP_SEARCH_BAR_OPACITY
@@ -163,6 +164,29 @@ class HotseatMod(context: Context) : ModPack(context) {
             }
         }
         }
+
+        // William, Sep 28 2026: stop the Pixel app-suggestion row from eating a
+        // real dock slot on every launcher restart.
+        //
+        // HybridHotseatOrganizer.fillGapsWithPrediction() walks numShownIcons
+        // slots and drops a PredictedAppIcon into the first one that is empty OR
+        // already a prediction. Captured on device with a probe on that method:
+        // the hotseat is not fully bound when it first runs -
+        //   fillGaps numShown=5 countX=5
+        //   slots=[Phone, Firefox, Messages, PlayStore, null]
+        // - the last dock app hasn't been added yet, so the filler claims the
+        // slot that app is about to occupy, and the far-right dock icon comes
+        // back as the suggestion chip. The launcher re-runs the filler on every
+        // hotseat hierarchy change and never hands the slot back.
+        //
+        // Neutralized rather than patched around: the timing lives inside the
+        // launcher's own load path (its loadingCheck doesn't cover this window),
+        // and no hook point can tell a "genuinely empty" slot from a "not bound
+        // yet" one. Losing a dock app to a suggestion chip is worse than not
+        // having suggestions in the dock.
+        findClass("com.android.launcher3.util.HybridHotseatOrganizer", suppressError = true)
+            ?.hookMethod("fillGapsWithPrediction")
+            ?.replace { }
 
         deviceProfileClass
             .hookConstructor()

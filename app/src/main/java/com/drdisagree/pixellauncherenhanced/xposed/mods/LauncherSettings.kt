@@ -23,10 +23,10 @@ import com.drdisagree.pixellauncherenhanced.xposed.ModPack
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.XposedHook.Companion.findClass
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.callMethod
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.callMethodSilently
-import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.callStaticMethodSilently
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.dumpClass
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getField
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getFieldSilently
+import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getStaticFieldSilently
 
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.hasMethod
 import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.hookConstructor
@@ -739,86 +739,52 @@ class LauncherSettings(context: Context) : ModPack(context) {
             }
         }
 
-        // William, Aug 2026: "Uninstall in context menu" feature, v2.
-        // v1 used SystemShortcut.UNINSTALL_APP, which always returned null -
-        // decompiled source (William pulled and jadx'd the real Pixel
-        // Launcher APK, Aug 2026) showed why: that factory is Private Space
-        // only (it checks UserCache...isPrivate() before doing anything, in
-        // SystemShortcut.java's giant deduplicated-lambda switch block).
-        // There is no general-purpose "uninstall" SystemShortcut.Factory in
-        // this launcher at all - Uninstall normally only exists as the
-        // drag-to-the-top-bin target, implemented in SecondaryDropTarget.java
-        // (confirmed via source): its static getUninstallTarget(Context,
-        // ItemInfo) resolves the target via LauncherApps and returns null
-        // for anything that isn't itemType==APPLICATION or is a system app
-        // (ApplicationInfo.FLAG_SYSTEM) - exactly the "declines when it
-        // legitimately can't be uninstalled" behavior UNINSTALL_APP was
-        // expected to have. performUninstall(Context, ComponentName,
-        // ItemInfo) then starts the real system uninstall confirmation
-        // activity.
+        // "Uninstall in context menu" feature.
         //
-        // The private-uninstall SystemShortcut.Factory itself builds its
-        // clickable entry via SystemShortcut.AppInfo's package-private mode
-        // constructor - AppInfo(iconResId, labelResId, ActivityContext,
-        // ItemInfo, View, mode) - passing mode=2 and then setting the
-        // resulting object's mSplitA11yInfo field to the ComponentName
-        // getUninstallTarget() returned (confirmed via source: the exact
-        // same field is reused for both split-accessibility-info in mode 0
-        // and the uninstall ComponentName in mode 2 - a typical R8 field-
-        // sharing trick). AppInfo.onClick() itself didn't decompile
-        // (jadx: "Method not decompiled"), so mode 2's exact click behavior
-        // isn't directly readable, but the field-reuse pattern is strong
-        // enough evidence to build the same object ourselves with a
-        // normal-app-resolved ComponentName instead of a private one -
-        // performUninstall() itself has no private-space-specific logic, so
-        // this should behave identically for any uninstallable app.
+        // William, Sep 28 2026: the Aug 2026 implementation hand-built a
+        // SystemShortcut.AppInfo through its package-private 6-arg constructor
+        // (passing mode=2) and stored the ComponentName in mSplitA11yInfo. That
+        // approach is dead on the Android 17 launcher (versionCode 907), so the
+        // entry stopped appearing entirely - the constructor lookup returned null
+        // and the hook bailed. Confirmed by decompiling the 907 build:
+        // SystemShortcut.AppInfo now has `public final int f6867c = 1` as a
+        // hardcoded mode field with only a 5-arg constructor, and mSplitA11yInfo
+        // is cast to a UserHandle in onClick's default branch (private-space
+        // "install to Play Store"), not to a ComponentName.
+        //
+        // The launcher itself now ships the real thing: SystemShortcut.UNINSTALL_APP
+        // = new UninstallAppFactory(false). mPrivateSpaceOnly=false means the
+        // factory no longer bails for normal users - it only returns null when
+        // SecondaryDropTarget.getUninstallTarget() says the app isn't
+        // uninstallable (system app), and UninstallApp.onClick() then calls
+        // performUninstall(). QuickstepLauncher only ever wires up
+        // UNINSTALL_PRIVATE_APP/PRIVATE_PROFILE_INSTALL into the menu, so
+        // UNINSTALL_APP is ours to add with no duplicate-entry risk.
+        //
+        // Using the launcher's own factory also drops ~60 lines of reflection
+        // into package-private constructors and private fields.
         if (uninstallInContextMenuScope != "off") {
-            val secondaryDropTargetClass =
-                findClass("com.android.launcher3.SecondaryDropTarget", suppressError = true)
-            val systemShortcutAppInfoClass =
-                findClass("com.android.launcher3.popup.SystemShortcut\$AppInfo", suppressError = true)
-            val activityContextClass = findClass("com.android.launcher3.views.ActivityContext", suppressError = true)
-            val itemInfoClass = findClass("com.android.launcher3.model.data.ItemInfo", suppressError = true)
             val popupContainerWithArrowClass = findClass(
                 "com.android.launcher3.popup.PopupContainerWithArrow",
                 suppressError = true
             )
-            val uninstallIconResId =
-                mContext.resources.getIdentifier("ic_uninstall_no_shadow", "drawable", mContext.packageName)
-            val uninstallLabelResId =
-                mContext.resources.getIdentifier("uninstall_drop_target_label", "string", mContext.packageName)
+            val systemShortcutClass = findClass(
+                "com.android.launcher3.popup.SystemShortcut",
+                suppressError = true
+            )
+            val uninstallFactory = systemShortcutClass?.getStaticFieldSilently("UNINSTALL_APP")
 
-            val appInfoCtor = if (
-                secondaryDropTargetClass != null && systemShortcutAppInfoClass != null &&
-                activityContextClass != null && itemInfoClass != null &&
-                uninstallIconResId != 0 && uninstallLabelResId != 0
-            ) {
-                runCatching {
-                    systemShortcutAppInfoClass.getDeclaredConstructor(
-                        Int::class.javaPrimitiveType,
-                        Int::class.javaPrimitiveType,
-                        activityContextClass,
-                        itemInfoClass,
-                        View::class.java,
-                        Int::class.javaPrimitiveType
-                    ).apply { isAccessible = true }
-                }.getOrNull()
-            } else {
-                null
-            }
-
-            if (secondaryDropTargetClass == null || appInfoCtor == null) {
-                log("Uninstall in context menu unavailable on this build (a required class/constructor/resource was not found).")
+            if (popupContainerWithArrowClass == null || uninstallFactory == null) {
+                log("Uninstall in context menu unavailable on this build (SystemShortcut.UNINSTALL_APP not found).")
             } else {
                 popupContainerWithArrowClass
-                    ?.hookMethod("addSystemShortcuts")
-                    ?.runBefore { param ->
+                    .hookMethod("addSystemShortcuts")
+                    .runBefore { param ->
                         val activityContext = param.thisObject.getFieldSilently("mActivityContext")
                             ?: return@runBefore
                         val originalIcon = param.thisObject.getFieldSilently("originalIcon")
                             ?: return@runBefore
                         val itemInfo = originalIcon.callMethodSilently("getTag") ?: return@runBefore
-                        val context = originalIcon.callMethodSilently("getContext") ?: return@runBefore
 
                         // Home screen vs app drawer: confirmed via decompiled source
                         // (William, Aug 2026, AppInfo.java line ~156) that the all-apps
@@ -837,34 +803,15 @@ class LauncherSettings(context: Context) : ModPack(context) {
                         }
                         if (!allowedForScope) return@runBefore
 
-                        val uninstallTarget = secondaryDropTargetClass.callStaticMethodSilently(
-                            "getUninstallTarget",
-                            context,
-                            itemInfo
-                        ) ?: return@runBefore // system app or otherwise not uninstallable - correct to skip
+                        // Null for system apps / anything not uninstallable - the
+                        // factory already applies exactly that check.
+                        val uninstallShortcut = uninstallFactory.callMethodSilently(
+                            "getShortcut",
+                            activityContext,
+                            itemInfo,
+                            originalIcon
+                        ) ?: return@runBefore
 
-                        val uninstallShortcut = runCatching {
-                            appInfoCtor.newInstance(
-                                uninstallIconResId,
-                                uninstallLabelResId,
-                                activityContext,
-                                itemInfo,
-                                originalIcon,
-                                2
-                            )
-                        }.getOrNull() ?: return@runBefore
-
-                        uninstallShortcut.setFieldSilently("mSplitA11yInfo", uninstallTarget)
-
-                        // No dedup-by-class check here: SystemShortcut.AppInfo is the SAME
-                        // class used for the ordinary "App info" entry (mode 0) and our
-                        // Uninstall entry (mode 2) - confirmed via diagnostic logging
-                        // (William, Aug 2026) that a javaClass-equality dedup check was
-                        // wrongly treating every app's normal "App info" shortcut as a
-                        // duplicate of our Uninstall shortcut and skipping the add whenever
-                        // App info was already present, i.e. always. Each addSystemShortcuts
-                        // call gets a fresh list from the framework, so there's no real
-                        // duplication risk to guard against.
                         @Suppress("UNCHECKED_CAST")
                         val existingList = param.args.getOrNull(0) as? List<Any> ?: return@runBefore
                         val newList = ArrayList(existingList)
