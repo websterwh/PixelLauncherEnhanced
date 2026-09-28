@@ -129,6 +129,39 @@ class HotseatMod(context: Context) : ModPack(context) {
                 adjustField("hotseatBarBottomSpacePx")
             }
 
+        // DESKTOP_ICON_HORIZONTAL_MARGIN: widen/narrow the home-screen grid from
+        // its center out, i.e. the same amount added to BOTH edges.
+        //
+        // William, Sep 28 2026: this went through two wrong shapes before it
+        // landed here. v56 mutated DeviceProfile.workspacePadding - dead on the
+        // Android 17 launcher (versionCode 907), the Rect lives on
+        // WorkspaceProfile under a de-prefixed name, and a TEMPORARY probe logged
+        // "workspacePadding=null" on a real launcher start. v57 moved it onto
+        // each page CellLayout's own padding, which worked until the user
+        // touched the home screen: Workspace.setInsets() re-applies
+        // workspaceProfile.cellLayoutPaddingPx to EVERY page on every insets
+        // dispatch (Workspace.java -> Workspace$$ExternalSyntheticLambda5 case 0,
+        // cellLayout.setPadding(rect.left, ...)), and that dispatch fires both on
+        // rotation and when the drag drop-target bar appears. The one-shot view
+        // hook was silently overwritten, leaving stock spacing - "spacing gets
+        // messed up when I move an app / rotate and come back".
+        //
+        // cellLayoutPaddingPx is the actual SOURCE of that padding, so adjusting
+        // it once on the profile makes every future setInsets() re-apply the
+        // margin on its own - no per-view bookkeeping, nothing to re-assert.
+        // Both edges move by the same amount, so the grid resizes symmetrically
+        // from the center. Only left/right are touched: top/bottom belong to the
+        // vertical DESKTOP_DOCK_SPACING patch above.
+        if (desktopIconHorizontalMargin != 0 && !alreadyAdjusted) {
+            val horizontalDeltaPx = mContext.toPx(desktopIconHorizontalMargin)
+            val padding = getAnyField("mWorkspaceProfile", "workspaceProfile")
+                .getFieldSilently("cellLayoutPaddingPx") as? Rect
+
+            if (padding != null) {
+                padding.left += horizontalDeltaPx
+                padding.right += horizontalDeltaPx
+            }
+        }
         }
 
         deviceProfileClass
@@ -137,51 +170,6 @@ class HotseatMod(context: Context) : ModPack(context) {
                 param.thisObject.hookDockBottomSpacing()
             }
 
-        // DESKTOP_ICON_HORIZONTAL_MARGIN: widen/narrow the home-screen grid from
-        // its center out, i.e. the same amount added to BOTH edges.
-        //
-        // William, Sep 28 2026: this used to mutate DeviceProfile.workspacePadding,
-        // which is dead on the Android 17 launcher (versionCode 907) - the field
-        // moved onto WorkspaceProfile AND lost its m-prefix, so both lookups
-        // missed and the slider did nothing at all (logcat proof: our own probe
-        // logged "workspacePadding=null" on a real launcher start). It wouldn't
-        // have produced centered spacing even if it had resolved: Workspace.setPadding()
-        // only moves the page's origin, it does not narrow the grid.
-        //
-        // The grid width actually comes from each page CellLayout's OWN padding.
-        // Logcat on the same build shows every page measuring with padL=32/padR=32
-        // (stock, symmetric), and CellLayout.onMeasure() derives cell width as
-        // calculateCellWidth(measuredWidth - padL - padR, borderSpace, countX).
-        // So adding the delta to both edges here shrinks the grid symmetrically
-        // from the center, which is what the slider promises.
-        //
-        // Each view is adjusted exactly once (WeakHashMap) - onMeasure runs
-        // repeatedly and setPadding() would otherwise stack the delta and
-        // requestLayout() on every pass.
-        val marginAdjusted =
-            java.util.Collections.newSetFromMap(java.util.WeakHashMap<View, Boolean>())
-        findClass("com.android.launcher3.CellLayout")
-            .hookMethod("onMeasure")
-            .runBefore { param ->
-                if (desktopIconHorizontalMargin == 0) return@runBefore
-                val view = param.thisObject as View
-                // Home-screen pages only. The dock's CellLayout is parented by
-                // Hotseat and is positioned through getHotseatLayoutPadding()
-                // below instead.
-                if (view.parent?.javaClass?.name != "com.android.launcher3.Workspace") {
-                    return@runBefore
-                }
-
-                if (!marginAdjusted.add(view)) return@runBefore
-
-                val deltaPx = mContext.toPx(desktopIconHorizontalMargin)
-                view.setPadding(
-                    view.paddingLeft + deltaPx,
-                    view.paddingTop,
-                    view.paddingRight + deltaPx,
-                    view.paddingBottom
-                )
-            }
         deviceProfileBuilderClass
             .hookMethod("build")
             .runAfter { param ->
@@ -242,10 +230,13 @@ class HotseatMod(context: Context) : ModPack(context) {
                         .getField("workspacePadding") as Rect
                 val workspace = param.thisObject as View
 
-                // padding.left/right already reflect DESKTOP_ICON_HORIZONTAL_MARGIN
-                // here - it's applied once, directly on this same Rect field, in
-                // hookDockBottomSpacing() above (so the dock picks up the same
-                // margin too). Only the bottom value still needs adjusting here.
+                // left/right are left stock on purpose: this is the Workspace
+                // view's own padding, and PagedView.onMeasure() gives its pages a
+                // measure width of (size - insets) regardless of it, so the
+                // horizontal margin belongs on the pages instead - which is where
+                // the launcher reads it from cellLayoutPaddingPx on every
+                // setInsets() (see hookDockBottomSpacing). Only the bottom value
+                // needs adjusting here.
                 workspace.setPadding(
                     padding.left,
                     padding.top,
