@@ -63,10 +63,21 @@ adb shell am force-stop com.google.android.apps.nexuslauncher
 - `AppWidgetManager.bindAppWidgetIdIfAllowed(appWidgetId, provider)` — id
   FIRST. Widget host id: `LauncherAppWidgetHost.APPWIDGET_HOST_ID` (1024).
 - `LauncherSettings$Favorites.CONTENT_URI` reflection fails on this build.
+- Module prefs live in DEVICE-PROTECTED storage, not the app's data dir:
+  `/data/user_de/0/com.drdisagree.pixellauncherenhanced/shared_prefs/com.drdisagree.pixellauncherenhanced_preferences.xml`
+  (`/data/data/com.drdisagree.pixellauncherenhanced/shared_prefs/` is EMPTY —
+  don't waste time looking there). Name comes from
+  `Constants.SHARED_PREFERENCES` = `${applicationId}_preferences`.
 
-## Current state (Aug 24, 2026)
+## Current state (Sep 27, 2026)
 
-- v1.2.0 release-signed, installed and working on device.
+- v1.2.0 release-signed (cert `e6026394…`), installed and working on device.
 - Import (apps/folders/widgets) confirmed working end-to-end by William.
 - Folder preview: grid-only, stock-anchored constants, animation fixes in.
+- Built against **Android 17 / Pixel Launcher 907** as of v56. Before touching
+  any hook, read the old→new field map in `CONTEXT.md` §4a — a missed
+  `getFieldSilently` fails silently, so renames are the failure mode that
+  never announces itself.
+- 8 commits ahead of `fork/layout-tweaks`, unpushed. Backup branch:
+  `backup/pre-merge-20260927`.
 - No open bugs. Feature requests go through William first.
