@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Rect
 import android.view.View
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.DESKTOP_DOCK_SPACING
-import com.drdisagree.pixellauncherenhanced.xposed.mods.toolkit.getFieldSilently
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.DESKTOP_ICON_HORIZONTAL_MARGIN
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.DESKTOP_SEARCH_BAR
 import com.drdisagree.pixellauncherenhanced.data.common.Constants.DESKTOP_SEARCH_BAR_OPACITY
@@ -165,28 +164,6 @@ class HotseatMod(context: Context) : ModPack(context) {
         }
         }
 
-        // William, Sep 28 2026: stop the Pixel app-suggestion row from eating a
-        // real dock slot on every launcher restart.
-        //
-        // HybridHotseatOrganizer.fillGapsWithPrediction() walks numShownIcons
-        // slots and drops a PredictedAppIcon into the first one that is empty OR
-        // already a prediction. Captured on device with a probe on that method:
-        // the hotseat is not fully bound when it first runs -
-        //   fillGaps numShown=5 countX=5
-        //   slots=[Phone, Firefox, Messages, PlayStore, null]
-        // - the last dock app hasn't been added yet, so the filler claims the
-        // slot that app is about to occupy, and the far-right dock icon comes
-        // back as the suggestion chip. The launcher re-runs the filler on every
-        // hotseat hierarchy change and never hands the slot back.
-        //
-        // Neutralized rather than patched around: the timing lives inside the
-        // launcher's own load path (its loadingCheck doesn't cover this window),
-        // and no hook point can tell a "genuinely empty" slot from a "not bound
-        // yet" one. Losing a dock app to a suggestion chip is worse than not
-        // having suggestions in the dock.
-        findClass("com.android.launcher3.util.HybridHotseatOrganizer", suppressError = true)
-            ?.hookMethod("fillGapsWithPrediction")
-            ?.replace { }
 
         deviceProfileClass
             .hookConstructor()
@@ -268,6 +245,49 @@ class HotseatMod(context: Context) : ModPack(context) {
                     if (desktopDockSpacing == -1) padding.bottom
                     else mContext.toPx(desktopDockSpacing + 20)
                 )
+            }
+
+        // William, Oct 2 2026: let the home screen actually rotate.
+        //
+        // RotationHelper.notifyChange() picks the activity's orientation request
+        // from three fields and, on this build, its default state resolves to
+        // SCREEN_ORIENTATION_PORTRAIT. Decompiled logic (states/RotationHelper.java):
+        //   mIsFixedLandscape        -> 11
+        //   mStateHandlerRequest==2  -> 14   (drag in progress)
+        //   mCurrentStateRequest==2  -> 14
+        //   mCurrentStateRequest==1  -> -1   (rotation ALLOWED)
+        //   mIgnoreAutoRotateSettings / mForceAllowRotationForTesting -> -1
+        //   otherwise                -> 5    (PORTRAIT)
+        // Launcher.onCreate() builds the helper with mStateHandlerRequest = 0 and
+        // mCurrentStateRequest = 0 (Launcher.java ~1403-1407), so on the home
+        // screen it falls straight through to 5 and calls
+        // setRequestedOrientation(PORTRAIT). Nothing on this build ever sets the
+        // fields that would yield -1.
+        //
+        // Proof on device: the launcher's own debug log prints the resolved
+        // request on every change, and with the phone rotation-locked to
+        // landscape it read
+        //   [mStateHandlerRequest=0, mCurrentStateRequest=0, mLastActivityFlags=5, ...]
+        // while the Settings app rotated normally on the same device state.
+        //
+        // So: whenever the helper is in its neutral "nothing requested" state,
+        // mark it as rotation-allowed before it computes the request. Scoped
+        // tightly - drag (state/request == 2) and the fixed-landscape case are
+        // left alone, so orientation locking still works during a drag and on
+        // devices/configs that pin landscape.
+        val rotationHelperClass =
+            findClass("com.android.launcher3.states.RotationHelper", suppressError = true)
+        rotationHelperClass
+            ?.hookMethod("notifyChange")
+            ?.runBefore {
+                val stateRequest = it.thisObject.getFieldSilently("mStateHandlerRequest") as? Int
+                val currentRequest = it.thisObject.getFieldSilently("mCurrentStateRequest") as? Int
+                val fixedLandscape = it.thisObject.getFieldSilently("mIsFixedLandscape") as? Boolean
+
+                // Only the neutral state; 2 = drag, 1 = already allowed.
+                if (fixedLandscape == false && stateRequest == 0 && currentRequest == 0) {
+                    it.thisObject.setFieldSilently("mCurrentStateRequest", 1)
+                }
             }
 
         ResourceHookManager

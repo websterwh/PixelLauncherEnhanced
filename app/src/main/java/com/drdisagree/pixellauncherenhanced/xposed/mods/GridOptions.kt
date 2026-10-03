@@ -126,6 +126,7 @@ class GridOptions(context: Context) : ModPack(context) {
             }
         }
 
+
         deviceProfileClass
             .hookConstructor()
             .runAfter { param ->
@@ -154,31 +155,57 @@ class GridOptions(context: Context) : ModPack(context) {
         // profile it used to patch is now built in the DeviceProfile constructor
         // and Builder.build(), both already hooked above via
         // hookDeviceProfile(), so there is nothing left to patch here.
+        // William, Sep 28 2026: runBefore, not runAfter, and numDatabaseHotseatIcons
+        // has to be written explicitly.
+        //
+        // initGrid() is where the launcher derives its "how many dock items exist"
+        // number: at the end of the method it copies
+        // displayOptionSpec.numShownHotseatIcons into the plain int
+        // numDatabaseHotseatIcons (InvariantDeviceProfile.java ~line 190-196).
+        // WorkspaceItemProcessor.finalizeData() then loads exactly that many
+        // hotseat rows from the DB. The old code patched
+        // displayOptionSpec.numShownHotseatIcons in runAfter, i.e. AFTER that
+        // copy had already happened - so numDatabaseHotseatIcons stayed at the
+        // stock value (4 on this device) while the CellLayout was widened to the
+        // requested 5 by hookDeviceProfile(). The 5th dock app was in the DB the
+        // whole time and simply never loaded, leaving a permanently empty slot
+        // that the app-prediction filler used to paper over.
+        //
+        // runBefore: numDatabaseHotseatIcons is DERIVED inside initGrid, from
+        // displayOptionSpec.numShownHotseatIcons near the end of the method, so
+        // the spec has to carry our value before initGrid reads it. Setting the
+        // plain int too is belt-and-braces for the case where initGrid isn't
+        // the path that populated the spec.
+        invariantDeviceProfileClass
+            .hookMethod("initGrid")
+            .runBefore { param ->
+                if (effectiveDockColumns == 0) return@runBefore
+                param.thisObject.apply {
+                    getFieldSilently("displayOptionSpec")
+                        ?.setFieldSilently("numShownHotseatIcons", effectiveDockColumns)
+                    setFieldSilently("numDatabaseHotseatIcons", effectiveDockColumns)
+                }
+            }
+
+        // runAfter, by contrast, for the grid dimensions: initGrid ASSIGNS
+        // numRows/numColumns from gridOption at its top (lines ~147-148), so a
+        // runBefore write would just be overwritten. They are only read by
+        // consumers later, so overwriting them after the fact sticks.
+        //
+        // Folder sizing is NOT applied here: InvariantDeviceProfile's
+        // numFolderRows/numFolderColumns are int[] in this build, so an Int
+        // cannot be written to those. It is handled against FolderProfile in
+        // hookDeviceProfile() above.
         invariantDeviceProfileClass
             .hookMethod("initGrid")
             .runAfter { param ->
                 param.thisObject.apply {
-                    // Still plain ints on InvariantDeviceProfile.
                     if (homeScreenGridRows != 0) {
                         setField("numRows", homeScreenGridRows)
                     }
                     if (homeScreenGridColumns != 0) {
                         setField("numColumns", homeScreenGridColumns)
                     }
-
-                    // numShownHotseatIcons moved off InvariantDeviceProfile onto
-                    // DisplayOptionSpec. The old setField() here threw
-                    // NoSuchFieldError (setField does not swallow), which aborted
-                    // this block and silently skipped everything below it.
-                    if (effectiveDockColumns != 0) {
-                        getFieldSilently("displayOptionSpec")
-                            ?.setFieldSilently("numShownHotseatIcons", effectiveDockColumns)
-                    }
-
-                    // Folder sizing is NOT applied here: InvariantDeviceProfile's
-                    // numFolderRows/numFolderColumns are int[] in this build, so an
-                    // Int cannot be written to them. It is handled against
-                    // FolderProfile in hookDeviceProfile() above.
                 }
             }
 
