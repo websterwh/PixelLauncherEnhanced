@@ -155,57 +155,52 @@ class GridOptions(context: Context) : ModPack(context) {
         // profile it used to patch is now built in the DeviceProfile constructor
         // and Builder.build(), both already hooked above via
         // hookDeviceProfile(), so there is nothing left to patch here.
-        // William, Sep 28 2026: runBefore, not runAfter, and numDatabaseHotseatIcons
-        // has to be written explicitly.
+        // William, Oct 2 2026: the dock count must be written in runAfter, and
+        // numDatabaseHotseatIcons is not optional - it is the value that decides
+        // whether a dock row survives loading at all.
         //
-        // initGrid() is where the launcher derives its "how many dock items exist"
-        // number: at the end of the method it copies
-        // displayOptionSpec.numShownHotseatIcons into the plain int
-        // numDatabaseHotseatIcons (InvariantDeviceProfile.java ~line 190-196).
-        // WorkspaceItemProcessor.finalizeData() then loads exactly that many
-        // hotseat rows from the DB. The old code patched
-        // displayOptionSpec.numShownHotseatIcons in runAfter, i.e. AFTER that
-        // copy had already happened - so numDatabaseHotseatIcons stayed at the
-        // stock value (4 on this device) while the CellLayout was widened to the
-        // requested 5 by hookDeviceProfile(). The 5th dock app was in the DB the
-        // whole time and simply never loaded, leaving a permanently empty slot
-        // that the app-prediction filler used to paper over.
+        // LoaderCursor.checkAndAddItem() (model/LoaderCursor.java) is the gate:
+        //     int i16 = this.idp.numDatabaseHotseatIcons;
+        //     if (i15 /* rank */ >= i16) { Log.e(... "position out of bounds ..."); }
+        //     else { ...mark the cell occupied and load... }
+        // A rejected row never gets an id assigned, so it also lands in
+        // itemsToRemove and WorkspaceItemProcessor DELETES the row from the DB.
+        // That is why a 5th dock app could not be kept around: with the derived
+        // count at the stock 4, rank 4 was rejected and erased on every launcher
+        // start, and the app-suggestion filler then filled the hole.
         //
-        // runBefore: numDatabaseHotseatIcons is DERIVED inside initGrid, from
-        // displayOptionSpec.numShownHotseatIcons near the end of the method, so
-        // the spec has to carry our value before initGrid reads it. Setting the
-        // plain int too is belt-and-braces for the case where initGrid isn't
-        // the path that populated the spec.
-        invariantDeviceProfileClass
-            .hookMethod("initGrid")
-            .runBefore { param ->
-                if (effectiveDockColumns == 0) return@runBefore
-                param.thisObject.apply {
-                    getFieldSilently("displayOptionSpec")
-                        ?.setFieldSilently("numShownHotseatIcons", effectiveDockColumns)
-                    setFieldSilently("numDatabaseHotseatIcons", effectiveDockColumns)
-                }
-            }
-
-        // runAfter, by contrast, for the grid dimensions: initGrid ASSIGNS
-        // numRows/numColumns from gridOption at its top (lines ~147-148), so a
-        // runBefore write would just be overwritten. They are only read by
-        // consumers later, so overwriting them after the fact sticks.
-        //
-        // Folder sizing is NOT applied here: InvariantDeviceProfile's
-        // numFolderRows/numFolderColumns are int[] in this build, so an Int
-        // cannot be written to those. It is handled against FolderProfile in
-        // hookDeviceProfile() above.
+        // initGrid() derives numDatabaseHotseatIcons from
+        // displayOptionSpec.numShownHotseatIcons near its end, so a runBefore
+        // write of either field is overwritten later in the same call. Both the
+        // spec and the derived int are therefore written in runAfter, once
+        // initGrid has finished computing them.
         invariantDeviceProfileClass
             .hookMethod("initGrid")
             .runAfter { param ->
                 param.thisObject.apply {
+                    // Grid dimensions. initGrid ASSIGNS numRows/numColumns from
+                    // gridOption at its top (~lines 147-148), so these are
+                    // written after the fact; nothing reads them inside the
+                    // method, so it sticks.
                     if (homeScreenGridRows != 0) {
                         setField("numRows", homeScreenGridRows)
                     }
                     if (homeScreenGridColumns != 0) {
                         setField("numColumns", homeScreenGridColumns)
                     }
+
+                    // Dock count - see the note above on why this is not
+                    // optional and why it has to land after initGrid.
+                    if (effectiveDockColumns != 0) {
+                        getFieldSilently("displayOptionSpec")
+                            ?.setFieldSilently("numShownHotseatIcons", effectiveDockColumns)
+                        setFieldSilently("numDatabaseHotseatIcons", effectiveDockColumns)
+                    }
+
+                    // Folder sizing is NOT applied here: InvariantDeviceProfile's
+                    // numFolderRows/numFolderColumns are int[] in this build, so
+                    // an Int cannot be written to those. It is handled against
+                    // FolderProfile in hookDeviceProfile() above.
                 }
             }
 
