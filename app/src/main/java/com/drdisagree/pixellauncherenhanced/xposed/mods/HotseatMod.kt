@@ -149,17 +149,35 @@ class HotseatMod(context: Context) : ModPack(context) {
         // cellLayoutPaddingPx is the actual SOURCE of that padding, so adjusting
         // it once on the profile makes every future setInsets() re-apply the
         // margin on its own - no per-view bookkeeping, nothing to re-assert.
-        // Both edges move by the same amount, so the grid resizes symmetrically
-        // from the center. Only left/right are touched: top/bottom belong to the
-        // vertical DESKTOP_DOCK_SPACING patch above.
+        // DESKTOP_ICON_HORIZONTAL_MARGIN: expand or contract the workspace
+        // content area by adjusting workspacePadding on the WorkspaceProfile.
+        //
+        // Positive margin -> inset the grid away from the screen edges (more
+        // space left/right). Negative margin -> push the grid closer to the
+        // edges (less padding). Either direction lives on workspacePadding so
+        // the effect is symmetric from the center.
+        //
+        // cellLayoutPaddingPx is NOT used here because it is re-read by
+        // Workspace.setInsets() on every inset dispatch and fed directly into
+        // CellLayout.onMeasure() as the page's padding. A negative value there
+        // makes the measured page width wider than the view, so icons in the
+        // first and last columns overflow the screen edges -- exactly the
+        // left-clip / right-sliver glitch seen before this fix.
+        //
+        // workspacePadding.left/right is clamped at 0: the grid can expand
+        // edge-to-edge but cannot bleed past the screen boundaries.
+        //
+        // William, Oct 2026: changed from cellLayoutPaddingPx to
+        // workspacePadding after observing left-column clip and partial 5th
+        // column on right with desktopIconHorizontalMargin = -15.
         if (desktopIconHorizontalMargin != 0 && !alreadyAdjusted) {
             val horizontalDeltaPx = mContext.toPx(desktopIconHorizontalMargin)
-            val padding = getAnyField("mWorkspaceProfile", "workspaceProfile")
-                .getFieldSilently("cellLayoutPaddingPx") as? Rect
+            val workspaceProfile = getAnyField("mWorkspaceProfile", "workspaceProfile")
+            val wsPadding = workspaceProfile?.getFieldSilently("workspacePadding") as? Rect
 
-            if (padding != null) {
-                padding.left += horizontalDeltaPx
-                padding.right += horizontalDeltaPx
+            if (wsPadding != null) {
+                wsPadding.left = (wsPadding.left + horizontalDeltaPx).coerceAtLeast(0)
+                wsPadding.right = (wsPadding.right + horizontalDeltaPx).coerceAtLeast(0)
             }
         }
         }
@@ -245,49 +263,6 @@ class HotseatMod(context: Context) : ModPack(context) {
                     if (desktopDockSpacing == -1) padding.bottom
                     else mContext.toPx(desktopDockSpacing + 20)
                 )
-            }
-
-        // William, Oct 2 2026: let the home screen actually rotate.
-        //
-        // RotationHelper.notifyChange() picks the activity's orientation request
-        // from three fields and, on this build, its default state resolves to
-        // SCREEN_ORIENTATION_PORTRAIT. Decompiled logic (states/RotationHelper.java):
-        //   mIsFixedLandscape        -> 11
-        //   mStateHandlerRequest==2  -> 14   (drag in progress)
-        //   mCurrentStateRequest==2  -> 14
-        //   mCurrentStateRequest==1  -> -1   (rotation ALLOWED)
-        //   mIgnoreAutoRotateSettings / mForceAllowRotationForTesting -> -1
-        //   otherwise                -> 5    (PORTRAIT)
-        // Launcher.onCreate() builds the helper with mStateHandlerRequest = 0 and
-        // mCurrentStateRequest = 0 (Launcher.java ~1403-1407), so on the home
-        // screen it falls straight through to 5 and calls
-        // setRequestedOrientation(PORTRAIT). Nothing on this build ever sets the
-        // fields that would yield -1.
-        //
-        // Proof on device: the launcher's own debug log prints the resolved
-        // request on every change, and with the phone rotation-locked to
-        // landscape it read
-        //   [mStateHandlerRequest=0, mCurrentStateRequest=0, mLastActivityFlags=5, ...]
-        // while the Settings app rotated normally on the same device state.
-        //
-        // So: whenever the helper is in its neutral "nothing requested" state,
-        // mark it as rotation-allowed before it computes the request. Scoped
-        // tightly - drag (state/request == 2) and the fixed-landscape case are
-        // left alone, so orientation locking still works during a drag and on
-        // devices/configs that pin landscape.
-        val rotationHelperClass =
-            findClass("com.android.launcher3.states.RotationHelper", suppressError = true)
-        rotationHelperClass
-            ?.hookMethod("notifyChange")
-            ?.runBefore {
-                val stateRequest = it.thisObject.getFieldSilently("mStateHandlerRequest") as? Int
-                val currentRequest = it.thisObject.getFieldSilently("mCurrentStateRequest") as? Int
-                val fixedLandscape = it.thisObject.getFieldSilently("mIsFixedLandscape") as? Boolean
-
-                // Only the neutral state; 2 = drag, 1 = already allowed.
-                if (fixedLandscape == false && stateRequest == 0 && currentRequest == 0) {
-                    it.thisObject.setFieldSilently("mCurrentStateRequest", 1)
-                }
             }
 
         ResourceHookManager
